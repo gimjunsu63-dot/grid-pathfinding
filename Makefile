@@ -5,9 +5,10 @@
 #   make test         unit tests
 #   make bench        all experiments -> results/*.csv (a few minutes)
 #   make bench-quick  tiny version of every experiment -> results/quick/
+#   make figures      pictures of what each algorithm explored -> figures/
 #   make clean        remove caches
 
-.PHONY: all run maps test bench bench-quick clean
+.PHONY: all run maps test bench bench-quick figures clean
 
 all: test
 
@@ -25,6 +26,9 @@ bench:
 
 bench-quick:
 	@python3 src/bench.py --quick
+
+figures:
+	@python3 src/visualize.py
 
 clean:
 	rm -rf src/__pycache__ tests/__pycache__ results/quick

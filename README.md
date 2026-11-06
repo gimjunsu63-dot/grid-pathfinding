@@ -20,6 +20,7 @@ make run           # 작은 예제 지도 3개에서 세 알고리즘 실행
 make maps          # 지도 종류별 작은 샘플 출력
 make bench         # 실험 전체 실행 -> results/*.csv (수 분)
 make bench-quick   # 실험 전체를 아주 작은 지도로 빠르게 (동작 확인용)
+make figures       # 지도별로 세 알고리즘이 탐색한 칸과 경로를 그림으로 -> figures/
 ```
 
 실험 하나만 다시 돌릴 때:
@@ -40,11 +41,14 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 │   ├── search.py    # bfs, dijkstra, astar (다익스트라와 A*는 같은 함수 best_first)
 │   ├── maps.py      # 지도 생성 6종 + 랜덤 출발·도착
 │   ├── bench.py     # 실험 실행, 측정, CSV 저장
+│   ├── visualize.py # 탐색 범위 그림 (PNG, 표준 모듈만)
 │   └── main.py      # 예제 실행
 ├── tests/
 │   ├── test_search.py   # 알고리즘 정확성
-│   └── test_maps.py     # 지도 생성, 측정 코드
+│   ├── test_maps.py     # 지도 생성, 측정 코드
+│   └── test_visualize.py # 그림 코드
 ├── results/         # 실험 결과 원본 (CSV) + 실행 환경 기록 (*.env.json)
+├── figures/         # 탐색 범위 그림 (figures/README.md에서 한눈에 보기)
 ├── docs/
 │   └── log.md       # 실험 노트
 └── .github/workflows/test.yml   # 커밋마다 테스트 자동 실행
@@ -120,6 +124,16 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 열린 칸 수(`open_cells`), 출발에서 도달 가능한 칸 수(`reachable`), 맨해튼 거리(`manhattan`),
 최적 비용(`optimal_cost`)입니다. 실행한 컴퓨터, Python 버전, 커밋은 `results/<실험>.env.json`에 남습니다.
 
+## 탐색 범위 그림
+
+`make figures`를 실행하면 지도 종류마다 BFS · 다익스트라 · A*가 탐색한 칸과 찾은 경로를
+나란히 그린 PNG가 `figures/maps/`에 생기고, 한눈에 보는 페이지 [`figures/README.md`](figures/README.md)가 만들어집니다.
+
+탐색한 칸은 알고리즘 코드를 고치지 않고 기록합니다. 세 알고리즘 모두 칸 하나를 처리할 때
+`grid.neighbors()`를 정확히 한 번 부르기 때문에, 이 호출을 기록하는 격자(`RecordingGrid`)를 넘기면
+실제 코드가 실제 순서대로 탐색한 칸이 남습니다. 기록한 칸 수가 알고리즘이 보고한 `expanded`와
+같은지도 테스트로 확인합니다.
+
 ## 테스트
 
 `make test`가 확인하는 것:
@@ -130,6 +144,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 4. 지도 생성: 같은 시드면 같은 지도, 출발·도착은 항상 열린 칸, 연결 여부, 완전 미로는 트리 구조,
    큰 미로(401 × 401)에서도 재귀 에러 없음, U자 벽이 직선 경로를 막는지, 지형 비용이 실제로 뭉쳐 있는지
 5. 측정 코드: 작은 실험을 돌려서 CSV 줄 수, 최적 비용 검사, 실행 순서 교대가 맞는지
+6. 그림 코드: 기록한 탐색 칸 수 = `expanded`, 기록해도 결과가 같은지, PNG 파일 형식이 맞는지
 
 ## 참고 자료와 AI 사용
 

@@ -18,3 +18,5 @@ jobs:
         run: make run
       - name: Run every experiment on tiny maps
         run: make bench-quick
+      - name: Draw figures
+        run: make figures
