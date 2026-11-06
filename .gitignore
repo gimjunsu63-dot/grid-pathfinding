@@ -18,3 +18,6 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# quick smoke-test results (make bench-quick); real results in results/ are committed
+results/quick/
