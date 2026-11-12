@@ -22,10 +22,11 @@ make bench         # 실험 전체 실행 -> results/*.csv (수 분)
 make bench-quick   # 실험 전체를 아주 작은 지도로 빠르게 (동작 확인용)
 make figures       # 지도별로 세 알고리즘이 탐색한 칸과 경로를 그림으로 -> figures/maps/
 make analyze       # results/*.csv로 그래프와 표 만들기 -> figures/charts/, figures/RESULTS.md
-make results       # bench + analyze + figures 한 번에 (약 5분)
+make summary       # 결과 한 장 요약 (조건별로 누가 이겼나 + 핵심 숫자) -> 터미널 + figures/SUMMARY.md
+make results       # bench + analyze + summary + figures 한 번에 (약 7분)
 ```
 
-**결과 보기**: [`figures/RESULTS.md`](figures/RESULTS.md) (그래프와 표), [`figures/README.md`](figures/README.md) (지도별 탐색 범위 그림)
+**결과 보기**: [`figures/SUMMARY.md`](figures/SUMMARY.md) (한 장 요약), [`figures/RESULTS.md`](figures/RESULTS.md) (그래프와 표), [`figures/README.md`](figures/README.md) (지도별 탐색 범위 그림)
 
 실험 하나만 다시 돌릴 때:
 
@@ -48,6 +49,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 │   ├── maps.py          # 지도 생성 6종 + 랜덤 출발·도착
 │   ├── bench.py         # 실험 실행, 측정, CSV 저장
 │   ├── analyze.py       # CSV -> 그래프(SVG) + 표
+│   ├── summary.py       # CSV -> 한 장 요약 (조건별 승자, 핵심 숫자)
 │   ├── svgchart.py      # SVG 그래프 그리기 (표준 모듈만)
 │   ├── visualize.py     # 탐색 범위 그림 (PNG, 표준 모듈만)
 │   └── main.py          # 예제 실행
@@ -58,7 +60,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 │   ├── test_analyze.py   # 그래프·분석 코드
 │   └── test_visualize.py # 그림 코드
 ├── results/         # 실험 결과 원본 (CSV) + 실행 환경 기록 (*.env.json)
-├── figures/         # RESULTS.md (그래프·표), README.md (탐색 범위 그림), charts/, maps/
+├── figures/         # SUMMARY.md (요약), RESULTS.md (그래프·표), README.md (탐색 범위 그림), charts/, maps/
 ├── docs/
 │   └── log.md       # 실험 노트
 └── .github/workflows/test.yml   # 커밋마다 테스트 자동 실행

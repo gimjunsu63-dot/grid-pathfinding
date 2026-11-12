@@ -7,10 +7,11 @@
 #   make bench-quick  tiny version of every experiment -> results/quick/
 #   make figures      pictures of what each algorithm explored -> figures/maps/
 #   make analyze      charts + tables from results/*.csv -> figures/charts/, figures/RESULTS.md
-#   make results      bench + analyze + figures (everything, about 5 minutes)
+#   make summary      one-page summary of all results (terminal + figures/SUMMARY.md)
+#   make results      bench + analyze + summary + figures (everything, about 7 minutes)
 #   make clean        remove caches
 
-.PHONY: all run maps test bench bench-quick figures analyze results clean
+.PHONY: all run maps test bench bench-quick figures analyze summary results clean
 
 all: test
 
@@ -35,7 +36,10 @@ figures:
 analyze:
 	@python3 src/analyze.py
 
-results: bench analyze figures
+summary:
+	@python3 src/summary.py --write
+
+results: bench analyze summary figures
 
 clean:
 	rm -rf src/__pycache__ tests/__pycache__ results/quick

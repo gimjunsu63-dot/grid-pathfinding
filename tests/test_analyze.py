@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import analyze  # noqa: E402
+import summary  # noqa: E402
 import bench  # noqa: E402
 from svgchart import LinePlot, bar_chart, log_ticks, nice_ticks, tint  # noqa: E402
 
@@ -60,6 +61,9 @@ class TestAnalyze(unittest.TestCase):
             text = (out / "RESULTS.md").read_text()
             for name in charts:
                 self.assertIn(f"charts/{name}", text)
+            short = summary.build(res)
+            self.assertIn("Who is fastest where", short)
+            self.assertIn("Time per expanded cell", short)
 
     def test_code_lines_skips_docstring_and_comments(self):
         def f(x):
