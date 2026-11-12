@@ -8,8 +8,8 @@ Each figure shows, left to right: **BFS | Dijkstra | A***.
 | --- | --- |
 | dark gray | wall |
 | white -> warm gray | open cell, cost 1 -> 9 |
-| light blue / green / orange | cells expanded by BFS / Dijkstra / A* |
-| dark blue / green / orange | path returned |
+| light blue / aqua / orange | cells expanded by BFS / Dijkstra / A* |
+| dark blue / aqua / orange | path returned |
 | red / purple | start / goal |
 
 Times are a single run made while drawing, for reference only. The numbers used for comparison are the experiment results in `results/`.
@@ -20,9 +20,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 118 | 118 | 2826 | 53 | 2.15 |
-| Dijkstra | 118 | 118 | 2826 | 53 | 7.61 |
-| A* | 118 | 118 | 431 | 269 | 1.93 |
+| BFS | 118 | 118 | 2826 | 53 | 3.40 |
+| Dijkstra | 118 | 118 | 2826 | 53 | 6.71 |
+| A* | 118 | 118 | 431 | 269 | 1.06 |
 
 ## Random obstacles 20%, cost 1-9 (same walls as above)
 
@@ -30,9 +30,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 568 | 118 | 2826 | 53 | 3.50 |
-| Dijkstra | 442 | 124 | 2826 | 74 | 8.11 |
-| A* | 442 | 124 | 2826 | 99 | 10.55 |
+| BFS | 568 | 118 | 2826 | 53 | 2.07 |
+| Dijkstra | 442 | 124 | 2826 | 74 | 4.49 |
+| A* | 442 | 124 | 2826 | 99 | 5.57 |
 
 ## Perfect maze (exactly one path)
 
@@ -40,9 +40,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 628 | 628 | 1165 | 5 | 1.54 |
-| Dijkstra | 628 | 628 | 1165 | 5 | 3.22 |
-| A* | 628 | 628 | 1048 | 6 | 3.67 |
+| BFS | 628 | 628 | 1165 | 5 | 1.09 |
+| Dijkstra | 628 | 628 | 1165 | 5 | 3.55 |
+| A* | 628 | 628 | 1048 | 6 | 3.02 |
 
 ## Maze with loops (10% extra openings)
 
@@ -50,9 +50,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 156 | 156 | 1754 | 29 | 2.43 |
-| Dijkstra | 156 | 156 | 1754 | 29 | 4.25 |
-| A* | 156 | 156 | 1199 | 43 | 4.06 |
+| BFS | 156 | 156 | 1754 | 29 | 2.05 |
+| Dijkstra | 156 | 156 | 1754 | 29 | 3.60 |
+| A* | 156 | 156 | 1199 | 43 | 2.87 |
 
 ## No path (goal sealed off)
 
@@ -60,9 +60,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | no path | - | 2824 | 53 | 3.40 |
-| Dijkstra | no path | - | 2824 | 53 | 7.82 |
-| A* | no path | - | 2824 | 1039 | 16.35 |
+| BFS | no path | - | 2824 | 53 | 4.15 |
+| Dijkstra | no path | - | 2824 | 53 | 7.37 |
+| A* | no path | - | 2824 | 1039 | 14.34 |
 
 ## U-shaped wall (A* trap)
 
@@ -70,9 +70,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 77 | 77 | 3443 | 71 | 4.48 |
-| Dijkstra | 77 | 77 | 3443 | 71 | 19.40 |
-| A* | 77 | 77 | 1037 | 102 | 3.81 |
+| BFS | 77 | 77 | 3443 | 71 | 2.65 |
+| Dijkstra | 77 | 77 | 3443 | 71 | 11.52 |
+| A* | 77 | 77 | 1037 | 102 | 1.99 |
 
 ## Terrain (cost 1-9 in patches)
 
@@ -80,9 +80,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 538 | 118 | 3600 | 60 | 4.50 |
-| Dijkstra | 375 | 118 | 3591 | 101 | 11.00 |
-| A* | 375 | 118 | 3550 | 160 | 31.04 |
+| BFS | 538 | 118 | 3600 | 60 | 2.68 |
+| Dijkstra | 375 | 118 | 3591 | 101 | 5.88 |
+| A* | 375 | 118 | 3550 | 160 | 7.56 |
 
 ## City blocks (arterial 1, local road 3, jam 9)
 
@@ -90,6 +90,6 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 266 | 118 | 975 | 21 | 1.11 |
-| Dijkstra | 124 | 118 | 644 | 30 | 1.77 |
-| A* | 124 | 118 | 225 | 36 | 1.17 |
+| BFS | 266 | 118 | 975 | 21 | 0.76 |
+| Dijkstra | 124 | 118 | 644 | 30 | 1.06 |
+| A* | 124 | 118 | 225 | 36 | 0.47 |

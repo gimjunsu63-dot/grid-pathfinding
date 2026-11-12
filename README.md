@@ -20,13 +20,17 @@ make run           # 작은 예제 지도 3개에서 세 알고리즘 실행
 make maps          # 지도 종류별 작은 샘플 출력
 make bench         # 실험 전체 실행 -> results/*.csv (수 분)
 make bench-quick   # 실험 전체를 아주 작은 지도로 빠르게 (동작 확인용)
-make figures       # 지도별로 세 알고리즘이 탐색한 칸과 경로를 그림으로 -> figures/
+make figures       # 지도별로 세 알고리즘이 탐색한 칸과 경로를 그림으로 -> figures/maps/
+make analyze       # results/*.csv로 그래프와 표 만들기 -> figures/charts/, figures/RESULTS.md
+make results       # bench + analyze + figures 한 번에 (약 5분)
 ```
+
+**결과 보기**: [`figures/RESULTS.md`](figures/RESULTS.md) (그래프와 표), [`figures/README.md`](figures/README.md) (지도별 탐색 범위 그림)
 
 실험 하나만 다시 돌릴 때:
 
 ```sh
-python3 src/bench.py --exp A          # 실험 A만
+python3 src/bench.py --exp A          # 실험 A만 (그다음 make analyze)
 python3 src/bench.py --exp C D        # 실험 C, D만
 python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 ```
@@ -38,17 +42,23 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 ```plaintext
 ├── src/
 │   ├── grid.py      # 격자 표현, 이웃 칸, 경로 복원, 경로 검사 (세 알고리즘 공용)
-│   ├── search.py    # bfs, dijkstra, astar (다익스트라와 A*는 같은 함수 best_first)
-│   ├── maps.py      # 지도 생성 6종 + 랜덤 출발·도착
-│   ├── bench.py     # 실험 실행, 측정, CSV 저장
-│   ├── visualize.py # 탐색 범위 그림 (PNG, 표준 모듈만)
-│   └── main.py      # 예제 실행
+│   ├── search.py        # bfs, dijkstra, astar (다익스트라와 A*는 같은 함수 best_first)
+│   ├── binheap.py       # 파이썬으로 짠 이진 힙 (heapq와 비교용)
+│   ├── bidirectional.py # 양방향 다익스트라
+│   ├── maps.py          # 지도 생성 6종 + 랜덤 출발·도착
+│   ├── bench.py         # 실험 실행, 측정, CSV 저장
+│   ├── analyze.py       # CSV -> 그래프(SVG) + 표
+│   ├── svgchart.py      # SVG 그래프 그리기 (표준 모듈만)
+│   ├── visualize.py     # 탐색 범위 그림 (PNG, 표준 모듈만)
+│   └── main.py          # 예제 실행
 ├── tests/
 │   ├── test_search.py   # 알고리즘 정확성
-│   ├── test_maps.py     # 지도 생성, 측정 코드
+│   ├── test_maps.py      # 지도 생성, 측정 코드
+│   ├── test_extras.py    # 직접 짠 힙, 양방향 다익스트라, 가중치 A*
+│   ├── test_analyze.py   # 그래프·분석 코드
 │   └── test_visualize.py # 그림 코드
 ├── results/         # 실험 결과 원본 (CSV) + 실행 환경 기록 (*.env.json)
-├── figures/         # 탐색 범위 그림 (figures/README.md에서 한눈에 보기)
+├── figures/         # RESULTS.md (그래프·표), README.md (탐색 범위 그림), charts/, maps/
 ├── docs/
 │   └── log.md       # 실험 노트
 └── .github/workflows/test.yml   # 커밋마다 테스트 자동 실행
@@ -109,7 +119,13 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 | C | 지도 종류 | 랜덤, 미로, 순환 미로, 경로 없음, U자 벽, 도시(비용 1) |
 | D | 비용 | 랜덤·도시 지도 비용 1 vs 비용 다름, 지형 |
 | E | 출발·도착 | 모서리 고정 vs 랜덤 (비용 1, 비용 1~9) |
+| T | A* 동점 처리 | f가 같을 때 g 큰 칸 먼저 / g 작은 칸 먼저 / 넣은 순서 |
+| W | 가중치 A* | h에 1, 1.5, 2, 3, 5를 곱함 (다익스트라와 비교) |
+| H | 우선순위 큐 | `heapq`(C로 구현) vs 파이썬으로 짠 이진 힙, 같은 탐색 코드 |
+| BI | 양방향 탐색 | 다익스트라, A*, 양방향 다익스트라 (모서리 / 랜덤 출발·도착, 지도 종류별) |
 | noise | 측정 흔들림 | 같은 지도를 30번씩 반복해 시간이 얼마나 흔들리는지 |
+
+A~E와 noise는 BFS · 다익스트라 · A* 세 가지를, T · W · H · BI는 표에 적은 알고리즘들을 비교합니다.
 
 측정 규칙:
 
@@ -117,12 +133,29 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 - 반복할 때마다 알고리즘 실행 순서를 돌림 (항상 같은 알고리즘이 먼저 돌지 않게)
 - 탐색 함수 호출만 시간을 잼 (`time.perf_counter_ns`). 지도 생성과 기준값 계산은 제외
 - 시간을 재는 동안 가비지 컬렉터를 멈춤
-- 매 실행마다 결과를 검사: 다익스트라와 A*는 최적 비용이어야 하고 BFS는 최적보다 작을 수 없음.
-  어긋나면 실험이 에러로 멈춤
+- 매 실행마다 결과를 검사: 다익스트라, A*, 양방향 다익스트라는 최적 비용이어야 하고,
+  BFS는 최적보다 작을 수 없고, 가중치 w인 A*는 최적의 w배를 넘을 수 없음. 어긋나면 실험이 에러로 멈춤
 
 결과 CSV의 한 줄은 "지도 하나에서 알고리즘 하나를 한 번 실행한 결과"이고, 같이 저장되는 기준값은
 열린 칸 수(`open_cells`), 출발에서 도달 가능한 칸 수(`reachable`), 맨해튼 거리(`manhattan`),
 최적 비용(`optimal_cost`)입니다. 실행한 컴퓨터, Python 버전, 커밋은 `results/<실험>.env.json`에 남습니다.
+
+## 분석
+
+`make analyze`가 `results/*.csv` 원본에서 다시 계산해서 그래프와 표를 만듭니다. 쓰는 지표:
+
+| 지표 | 계산 |
+| --- | --- |
+| 시간 | 지도 10개 × 5번 실행의 중앙값, 사분위 범위(IQR) 함께 |
+| 기울기 | 로그-로그 그래프에서 칸 수에 대한 기울기 (1이면 칸 수에 비례) |
+| 칸당 시간 | 시간 ÷ 탐색한 칸 수 (마이크로초) |
+| 탐색 비율 | 탐색한 칸 ÷ 출발에서 도달 가능한 칸 |
+| 휴리스틱 정확도 | 출발점의 맨해튼 거리 ÷ 최적 비용 |
+| A* 작업 비율 | 같은 지도에서 A* 탐색 칸 ÷ 다익스트라 탐색 칸 |
+| 비용 비율 | 찾은 경로 비용 ÷ 최적 비용 |
+| 코드 줄 수 | 함수별 줄 수 (빈 줄, 주석, 독스트링 제외) |
+
+알고리즘별 색은 모든 그림에서 같습니다: BFS 파랑, 다익스트라 청록, A* 주황, 양방향 보라.
 
 ## 탐색 범위 그림
 
@@ -145,6 +178,9 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
    큰 미로(401 × 401)에서도 재귀 에러 없음, U자 벽이 직선 경로를 막는지, 지형 비용이 실제로 뭉쳐 있는지
 5. 측정 코드: 작은 실험을 돌려서 CSV 줄 수, 최적 비용 검사, 실행 순서 교대가 맞는지
 6. 그림 코드: 기록한 탐색 칸 수 = `expanded`, 기록해도 결과가 같은지, PNG 파일 형식이 맞는지
+7. 추가 알고리즘: 직접 짠 힙이 `heapq`와 같은 순서로 꺼내는지, 어느 힙을 써도 탐색 결과가 똑같은지,
+   양방향 다익스트라를 참조 구현과 랜덤 지도 300개에서 비교, 가중치 A* 비용이 최적의 w배 이내인지
+8. 분석 코드: 작은 실험 전체로 그래프·표를 끝까지 만들어 보고, SVG 형식이 맞는지
 
 ## 참고 자료와 AI 사용
 

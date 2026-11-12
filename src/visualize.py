@@ -28,16 +28,23 @@ from bench import timed_run  # noqa: E402
 from grid import WALL, Grid  # noqa: E402
 from maps import make_map  # noqa: E402
 from search import ALGORITHMS  # noqa: E402
+from svgchart import ALGO_COLORS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "figures"
 
-# One color per algorithm, kept the same in every figure of the project.
-COLORS = {
-    "bfs": {"explored": (31, 119, 180), "path": (8, 48, 107)},
-    "dijkstra": {"explored": (44, 160, 44), "path": (0, 90, 20)},
-    "astar": {"explored": (255, 127, 14), "path": (166, 54, 3)},
-}
+# One color per algorithm, the same as in every chart (svgchart.ALGO_COLORS).
+def _rgb(hex_color):
+    h = hex_color.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _shade(rgb, amount):
+    return tuple(round(c * (1 - amount)) for c in rgb)
+
+
+COLORS = {name: {"explored": _rgb(ALGO_COLORS[name]), "path": _shade(_rgb(ALGO_COLORS[name]), 0.45)}
+          for name in ("bfs", "dijkstra", "astar")}
 WALL_COLOR = (45, 45, 45)
 START_COLOR = (220, 20, 60)
 GOAL_COLOR = (120, 40, 200)
@@ -195,8 +202,8 @@ def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
         "| --- | --- |",
         "| dark gray | wall |",
         "| white -> warm gray | open cell, cost 1 -> 9 |",
-        "| light blue / green / orange | cells expanded by BFS / Dijkstra / A* |",
-        "| dark blue / green / orange | path returned |",
+        "| light blue / aqua / orange | cells expanded by BFS / Dijkstra / A* |",
+        "| dark blue / aqua / orange | path returned |",
         "| red / purple | start / goal |",
         "",
         "Times are a single run made while drawing, for reference only. "

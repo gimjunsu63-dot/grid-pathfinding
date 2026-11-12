@@ -22,6 +22,7 @@ import heapq
 from collections import deque
 from dataclasses import dataclass
 
+import binheap
 from grid import manhattan, path_cost, reconstruct_path
 
 
@@ -94,8 +95,16 @@ def bfs(grid, start, goal):
 
 TIE_BREAKS = ("high_g", "low_g", "fifo")
 
+# (push, pop) pairs. "heapq" is the standard module (core in C),
+# "python" is binheap.py, a plain-Python binary heap with the same behavior.
+HEAPS = {
+    "heapq": (heapq.heappush, heapq.heappop),
+    "python": (binheap.push, binheap.pop),
+}
 
-def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="high_g"):
+
+def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="high_g",
+               heap_impl="heapq"):
     """Pop the cell with smallest f = g + weight * h.
 
     use_heuristic=False -> h = 0 -> Dijkstra.
@@ -104,11 +113,15 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
         "high_g" prefer larger g (cells closer to the goal)  <- default
         "low_g"  prefer smaller g
         "fifo"   insertion order
-    Python's heapq has no decrease-key, so a cell may be pushed more than
-    once; outdated entries are skipped when popped (lazy deletion).
+    heap_impl picks the priority queue: "heapq" (default) or "python".
+    Neither has decrease-key, so a cell may be pushed more than once;
+    outdated entries are skipped when popped (lazy deletion).
     """
     if tie_break not in TIE_BREAKS:
         raise ValueError(f"tie_break must be one of {TIE_BREAKS}")
+    if heap_impl not in HEAPS:
+        raise ValueError(f"heap_impl must be one of {tuple(HEAPS)}")
+    push, pop = HEAPS[heap_impl]
     quick = _trivial(grid, start, goal)
     if quick is not None:
         return quick
@@ -144,7 +157,7 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
     max_frontier = 1
 
     while heap:
-        _, _, _, gcur, cur = heapq.heappop(heap)
+        _, _, _, gcur, cur = pop(heap)
         if cur in closed or gcur > dist[cur]:
             stale += 1
             continue
@@ -161,19 +174,21 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
                 dist[nxt] = ng
                 parent[nxt] = cur
                 counter += 1
-                heapq.heappush(heap, (ng + h(nxt), tie(ng), counter, ng, nxt))
+                push(heap, (ng + h(nxt), tie(ng), counter, ng, nxt))
         if len(heap) > max_frontier:
             max_frontier = len(heap)
 
     return SearchResult(None, None, expanded, stale, max_frontier)
 
 
-def dijkstra(grid, start, goal, tie_break="high_g"):
-    return best_first(grid, start, goal, use_heuristic=False, tie_break=tie_break)
+def dijkstra(grid, start, goal, tie_break="high_g", heap_impl="heapq"):
+    return best_first(grid, start, goal, use_heuristic=False, tie_break=tie_break,
+                      heap_impl=heap_impl)
 
 
-def astar(grid, start, goal, weight=1.0, tie_break="high_g"):
-    return best_first(grid, start, goal, use_heuristic=True, weight=weight, tie_break=tie_break)
+def astar(grid, start, goal, weight=1.0, tie_break="high_g", heap_impl="heapq"):
+    return best_first(grid, start, goal, use_heuristic=True, weight=weight,
+                      tie_break=tie_break, heap_impl=heap_impl)
 
 
 ALGORITHMS = {

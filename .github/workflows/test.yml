@@ -20,3 +20,5 @@ jobs:
         run: make bench-quick
       - name: Draw figures
         run: make figures
+      - name: Draw charts from the tiny results
+        run: python3 src/analyze.py --results results/quick --out results/quick/figures
