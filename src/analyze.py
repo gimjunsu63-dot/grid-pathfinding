@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bidirectional  # noqa: E402
 import jps  # noqa: E402
+import landmarks  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import search  # noqa: E402
 from svgchart import ALGO_COLORS, INK_2, MUTED, LinePlot, bar_chart, bar_panels, tint  # noqa: E402
@@ -39,6 +40,7 @@ from svgchart import ALGO_COLORS, INK_2, MUTED, LinePlot, bar_chart, bar_panels,
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ["bfs", "dijkstra", "astar"]
 NAMES = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "bidir": "Bidirectional", "jps": "JPS"}
+HQ_MAPS = {"random": "random 20%, cost 1-9", "maze": "maze", "city": "city, jams 20%"}
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +64,8 @@ def load(results_dir, exp):
             r["optimal_cost"] = int(r["optimal_cost"]) if r["optimal_cost"] else None
             r["h_start"] = int(r["h_start"]) if r.get("h_start") else None
             r["scanned"] = int(r["scanned"]) if r.get("scanned") else 0
+            r["prep_ms"] = float(r["prep_ms"]) if r.get("prep_ms") else 0.0
+            r["h_accuracy"] = float(r["h_accuracy"]) if r.get("h_accuracy") else None
             rows.append(r)
     return rows
 
@@ -140,6 +144,17 @@ def per_map(rows):
     return out
 
 
+def linear_fit(xs, ys):
+    """Least squares y = a + b x. Returns (a, b, r squared)."""
+    mx, my = statistics.mean(xs), statistics.mean(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+    a = my - b * mx
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    ss_res = sum((y - a - b * x) ** 2 for x, y in zip(xs, ys))
+    return a, b, 1 - ss_res / ss_tot if ss_tot else 1.0
+
+
 def slope(xs, ys):
     lx = [math.log10(x) for x in xs]
     ly = [math.log10(y) for y in ys]
@@ -215,6 +230,9 @@ def code_size_table():
          code_lines(bidirectional.bidirectional_dijkstra)],
         ["JPS", "`jump_point_search` + `_expand_path`",
          code_lines(jps.jump_point_search) + code_lines(jps._expand_path)],
+        ["A* + landmarks", "`best_first` + `LandmarkHeuristic` + `choose_landmarks` + `distances_from`",
+         bf + code_lines(landmarks.LandmarkHeuristic.__call__) + code_lines(landmarks.choose_landmarks)
+         + code_lines(landmarks.distances_from)],
         ["shared by all", "`Grid.neighbors`, `reconstruct_path`, `_trivial`", shared],
     ]
     note = ("Dijkstra and A* share `best_first`, which also carries the options used in the "
@@ -479,6 +497,137 @@ def chart_traffic(summary, out):
 
 
 # ---------------------------------------------------------------------------
+# heuristic quality (HQ)
+# ---------------------------------------------------------------------------
+
+
+def hq_table(rows):
+    """map kind -> algorithm -> medians over maps: accuracy, work (% of Dijkstra cells), time, prep."""
+    per_map = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        per_map[(r["kind"], r["map_index"])][r["algorithm"]].append(r)
+    out = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for (kind, _), algs in per_map.items():
+        d_cells = algs["dijkstra"][0]["expanded"]
+        d_time = statistics.median(x["time_ms"] for x in algs["dijkstra"])
+        for alg, rs in algs.items():
+            o = out[kind][alg]
+            o["accuracy"].append(rs[0]["h_accuracy"] or 0.0)
+            o["work"].append(rs[0]["expanded"] / d_cells * 100 if d_cells else 0)
+            o["time"].append(statistics.median(x["time_ms"] for x in rs))
+            o["time_rel"].append(statistics.median(x["time_ms"] for x in rs) / d_time * 100)
+            o["prep"].append(rs[0]["prep_ms"])
+            o["per_cell"].append(statistics.median(x["time_ms"] * 1000 / x["expanded"] for x in rs if x["expanded"]))
+            o["cost_ratio"].append(rs[0]["cost"] / rs[0]["optimal_cost"] if rs[0]["optimal_cost"] else 1)
+    return {k: {a: {m: statistics.median(v) for m, v in d.items()} for a, d in algs.items()}
+            for k, algs in out.items()}
+
+
+def _hq_order(algs):
+    rulers = sorted((a for a in algs if a.startswith("ruler")), key=lambda a: float(a[5:]))
+    alts = sorted((a for a in algs if a.startswith("alt")), key=lambda a: int(a[3:]))
+    return rulers, alts
+
+
+def chart_hq_curves(table, out):
+    names = []
+    for kind, algs in table.items():
+        rulers, alts = _hq_order(algs)
+        p = LinePlot(f"Accuracy vs work: {HQ_MAPS.get(kind, kind)}",
+                     "heuristic accuracy (mean of estimate / real remaining cost)",
+                     "A* expanded cells (% of Dijkstra, log)", ylog=True, xlim=(0, 1.55),
+                     xticks=[0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5], xfmt=lambda v: f"{v:.0%}" if v else "0",
+                     yticks=[0.5, 1, 2, 5, 10, 20, 50, 100], ylim=(0.5, 100), width=720,
+                     subtitle="Gray: the ruler h = k x real cost (not a method). Medians of 10 maps, random start and goal.")
+        rx = [0.0] + [algs[a]["accuracy"] for a in rulers]
+        ry = [100.0] + [max(algs[a]["work"], 0.5) for a in rulers]
+        p.line(rx, ry, MUTED, "ruler: k x real remaining cost", dashed=True)
+        for a, x, y in zip(rulers, rx[1:], ry[1:]):
+            if a in ("ruler0.5", "ruler0.9", "ruler1", "ruler1.5"):
+                p.note(x, y, f"k={a[5:]}", anchor="start", dy=-9)
+        p.scatter([0.0], [100.0], ALGO_COLORS["dijkstra"], "Dijkstra (h = 0)", r=6, opacity=1)
+        m = algs["astar"]
+        p.scatter([m["accuracy"]], [max(m["work"], 0.5)], ALGO_COLORS["astar"], "A* + Manhattan", r=6, opacity=1)
+        p.note(m["accuracy"], max(m["work"], 0.5), "Manhattan", anchor="start", dy=-10)
+        p.scatter([algs[a]["accuracy"] for a in alts], [max(algs[a]["work"], 0.5) for a in alts],
+                  ALGO_COLORS["alt"], "A* + landmarks", r=6, opacity=1,
+                  titles=[f"{a[3:]} landmarks: accuracy {algs[a]['accuracy']:.0%}, {algs[a]['work']:.1f}%" for a in alts])
+        for a in alts:
+            if a in ("alt1", "alt4", "alt16"):
+                p.note(algs[a]["accuracy"] - 0.025, max(algs[a]["work"], 0.5), f"{a[3:]} LM", anchor="end", dy=4)
+        p.reference([1.0, 1.0], [0.5, 100], "perfect")
+        name = f"HQ_curve_{kind}.svg"
+        (out / name).write_text(p.render())
+        names.append(name)
+    return names
+
+
+def chart_hq_time(table, out):
+    panels = []
+    for kind, algs in table.items():
+        _, alts = _hq_order(algs)
+        order = ["dijkstra", "astar"] + alts
+        panels.append(dict(
+            title=HQ_MAPS.get(kind, kind),
+            categories=["Dij", "Man"] + [a[3:] for a in alts],
+            values=[algs[a]["time"] for a in order],
+            labels=[f"{algs[a]['accuracy']:.0%}" for a in order],
+            colors=[ALGO_COLORS["dijkstra"], ALGO_COLORS["astar"]] + [ALGO_COLORS["alt"]] * len(alts),
+        ))
+    (out / "HQ_time.svg").write_text(bar_panels(
+        "Query time: Dijkstra, Manhattan A*, A* with 1-16 landmarks", panels, "search time (ms, median)",
+        subtitle="Labels above bars: heuristic accuracy. Precomputation is not included here (see next chart).",
+        width=1000, height=360))
+
+
+def chart_hq_cost(table, out, slopes):
+    counts = None
+    p = LinePlot("Landmark precomputation: a fixed part + one Dijkstra per landmark", "landmarks",
+                 "precomputation (ms)", xticks=[0, 1, 2, 4, 8, 16], xlim=(0, 16), width=640,
+                 subtitle="Dashed: least-squares line a + b x landmarks. A straight line = linear in the number of landmarks.")
+    q = LinePlot("Each landmark adds work to every estimate", "landmarks", "time per expanded cell (us)",
+                 xticks=[0, 1, 2, 4, 8, 16], xlim=(0, 16), width=640,
+                 subtitle="A* computes two bounds per landmark for every cell it looks at.")
+    tints = [0.0, 0.35, 0.6]
+    for i, (kind, algs) in enumerate(table.items()):
+        _, alts = _hq_order(algs)
+        counts = [int(a[3:]) for a in alts]
+        color = tint(ALGO_COLORS["alt"], tints[i % len(tints)])
+        prep = [algs[a]["prep"] for a in alts]
+        a_fit, b_fit, r2 = linear_fit(counts, prep)
+        slopes[kind] = (a_fit, b_fit, r2)
+        p.line(counts, prep, color, HQ_MAPS.get(kind, kind), end_label=f"{b_fit:.0f} ms / landmark")
+        p.reference([0, 16], [a_fit, a_fit + 16 * b_fit], None)
+        q.line(counts, [algs[a]["per_cell"] for a in alts], color, HQ_MAPS.get(kind, kind),
+               end_label=HQ_MAPS.get(kind, kind).split(",")[0])
+    (out / "HQ_prep.svg").write_text(p.render())
+    (out / "HQ_per_cell.svg").write_text(q.render())
+
+
+def hq_section_table(table):
+    rows = []
+    for kind, algs in table.items():
+        rulers, alts = _hq_order(algs)
+        d_time = algs["dijkstra"]["time"]
+        for a in ["dijkstra", "astar"] + alts + rulers:
+            g = algs[a]
+            if a.startswith("alt"):
+                label = f"A* + {a[3:]} landmarks"
+            elif a.startswith("ruler"):
+                label = f"ruler k = {a[5:]}"
+            else:
+                label = {"dijkstra": "Dijkstra", "astar": "A* + Manhattan"}[a]
+            saved = d_time - g["time"]
+            even = f"{g['prep'] / saved:.1f}" if g["prep"] and saved > 0 and a.startswith("alt") else "-"
+            rows.append([HQ_MAPS.get(kind, kind), label, f"{g['accuracy']:.0%}", f"{g['work']:.1f}%",
+                         f"{g['time']:.2f}", f"{g['prep']:.1f}" if g["prep"] else "-", even,
+                         f"{g['cost_ratio']:.3f}"])
+    return md_table(["map", "heuristic", "accuracy", "cells vs Dijkstra", "time ms", "precompute ms",
+                     "queries to pay off (vs Dijkstra)", "cost / optimal"], rows,
+                    ["---", "---"] + ["---:"] * 6)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -499,7 +648,7 @@ def analyze(results_dir, out_dir, log=print):
     charts = out_dir / "charts"
     charts.mkdir(parents=True, exist_ok=True)
     data = {exp: load(results_dir, exp)
-            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "noise")}
+            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -621,6 +770,23 @@ def analyze(results_dir, out_dir, log=print):
         s = summarize(data["J"])
         chart_traffic(s, charts)
         section("J. Traffic jams", ["J_time.svg", "J_why.svg"], condition_table(s, ["bfs", "dijkstra", "astar", "bidir"]))
+
+    if data["HQ"]:
+        table = hq_table(data["HQ"])
+        curves = chart_hq_curves(table, charts)
+        chart_hq_time(table, charts)
+        hq_slopes = {}
+        chart_hq_cost(table, charts, hq_slopes)
+        section("HQ. Heuristic quality: Manhattan vs landmarks, measured with the accuracy ruler",
+                curves + ["HQ_time.svg", "HQ_prep.svg", "HQ_per_cell.svg"],
+                hq_section_table(table),
+                "Accuracy = mean over all cells that can reach the goal of (estimate / real remaining cost). "
+                "The ruler h = k x real remaining cost needs the answer in advance, so it is a measuring tool, "
+                "not a competitor. Random start and goal: landmarks are computed once per map and serve any query. "
+                "Queries to pay off = precomputation time / time saved per query compared with Dijkstra. "
+                "Precomputation fitted as a + b x landmarks: "
+                + ", ".join(f"{HQ_MAPS.get(k, k)}: {a:.0f} ms + {b:.1f} ms per landmark (R² {r2:.3f})"
+                            for k, (a, b, r2) in hq_slopes.items()) + ".")
 
     section("Code size", [], code_size_table(),
             "Lines of code without blank lines, comments and docstrings.")

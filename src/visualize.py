@@ -1,6 +1,6 @@
 """Draw what each algorithm explored, as PNG images. Standard library only.
 
-    python3 src/visualize.py            # writes figures/maps/*.png, figures/maps8/*.png + figures/README.md
+    python3 src/visualize.py            # writes figures/maps/, maps8/, landmarks/ (*.png) + figures/README.md
 
 For every map kind, one PNG with three panels side by side:
     BFS | Dijkstra | A*
@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench import timed_run  # noqa: E402
 from grid import WALL, Grid, Grid8  # noqa: E402
 from jps import jump_point_search  # noqa: E402
+from landmarks import landmark_heuristic  # noqa: E402
+from search import astar  # noqa: E402
 from maps import make_map  # noqa: E402
 from search import ALGORITHMS  # noqa: E402
 from svgchart import ALGO_COLORS  # noqa: E402
@@ -45,7 +47,7 @@ def _shade(rgb, amount):
 
 
 COLORS = {name: {"explored": _rgb(ALGO_COLORS[name]), "path": _shade(_rgb(ALGO_COLORS[name]), 0.45)}
-          for name in ("bfs", "dijkstra", "astar", "jps")}
+          for name in ("bfs", "dijkstra", "astar", "jps", "alt")}
 JUMP_POINT_COLOR = (20, 20, 20)
 WALL_COLOR = (45, 45, 45)
 START_COLOR = (220, 20, 60)
@@ -81,8 +83,13 @@ class RecordingGrid8(Grid8):
 
 def explored_cells(name, grid, start, goal):
     """Run one algorithm and return (result, expanded cells in order)."""
+    return explored_with(ALGORITHMS[name], grid, start, goal)
+
+
+def explored_with(fn, grid, start, goal):
+    """Same as explored_cells for any search function fn(grid, start, goal)."""
     rec = RecordingGrid8(grid) if grid.moves == 8 else RecordingGrid(grid)
-    result = ALGORITHMS[name](rec, start, goal)
+    result = fn(rec, start, goal)
     order = list(rec.order)
     if result.found and start != goal:
         order.append(grid.index(goal))          # expanded, but neighbors not asked
@@ -212,6 +219,35 @@ def draw_case8(case, path_png, panel_px=360):
     return stats
 
 
+def draw_case_landmarks(case, path_png, count=4, panel_px=360):
+    """Dijkstra | A* + Manhattan | A* + landmarks (landmarks drawn as dark squares)."""
+    grid = case.grid
+    px = max(1, panel_px // max(grid.width, grid.height))
+    pw, ph = grid.width * px, grid.height * px
+    canvas = Canvas(3 * pw + 4 * GAP, ph + 2 * GAP)
+    h = landmark_heuristic(grid, case.start, count)
+    runs = [
+        ("dijkstra", ALGORITHMS["dijkstra"], COLORS["dijkstra"]),
+        ("astar", ALGORITHMS["astar"], COLORS["astar"]),
+        ("alt", lambda g, s, t: astar(g, s, t, heuristic=h), COLORS["alt"]),
+    ]
+    stats = {}
+    for k, (name, fn, colors) in enumerate(runs):
+        result, order = explored_with(fn, grid, case.start, case.goal)
+        _, ms = timed_run(fn, grid, case.start, case.goal)
+        draw_panel(canvas, GAP + k * (pw + GAP), GAP, px, grid, case.start, case.goal, order, result.path, colors)
+        stats[name] = dict(found=result.found, cost=result.cost, expanded=result.expanded, time_ms=ms)
+    ox = GAP + 2 * (pw + GAP)
+    m = max(px + 4, 8)
+    for idx in h.landmarks:
+        r, c = divmod(idx, grid.width)
+        cx, cy = ox + c * px + px // 2, GAP + r * px + px // 2
+        canvas.rect(cx - m // 2 - 1, cy - m // 2 - 1, m + 2, m + 2, (255, 255, 255))
+        canvas.rect(cx - m // 2, cy - m // 2, m, m, JUMP_POINT_COLOR)
+    canvas.save_png(path_png)
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # gallery
 # ---------------------------------------------------------------------------
@@ -235,7 +271,14 @@ GALLERY8 = [
     ("maze-loops", "8 directions: maze with loops", dict(kind="maze", loop_ratio=0.1)),
 ]
 
-LABELS = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "jps": "JPS"}
+GALLERY_LM = [
+    ("random-weighted", "Landmarks: random obstacles 20%, cost 1-9", dict(kind="random", wall_ratio=0.2, weighted=True)),
+    ("maze", "Landmarks: maze", dict(kind="maze")),
+    ("city-jams", "Landmarks: city, every road cost 1, 20% of road cells jammed (cost 9)",
+     dict(kind="city", weighted=True, local_cost=1, jam_arterials=True, jam_ratio=0.2)),
+]
+
+LABELS = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "jps": "JPS", "alt": "A* + 4 landmarks"}
 
 
 def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
@@ -276,6 +319,28 @@ def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
                          f"{s['max_frontier']} | {s['time_ms']:.2f} |")
         lines.append("")
         log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
+    lm_dir = out_dir / "landmarks"
+    lm_dir.mkdir(parents=True, exist_ok=True)
+    lines += [
+        "# Landmarks (main experiment)", "",
+        "Left to right: **Dijkstra | A* + Manhattan | A* + 4 landmarks**. Random start and goal. "
+        "Black squares in the right panel are the landmarks; their distances to every cell are computed "
+        "before the search.", "",
+    ]
+    for name, title, params in GALLERY_LM:
+        params = dict(params)
+        kind = params.pop("kind")
+        case = make_map(kind, size, seed, endpoints="random", **params)
+        png = lm_dir / f"{name}.png"
+        stats = draw_case_landmarks(case, png)
+        lines += [f"## {title}", "", f"![{name}](landmarks/{png.name})", "",
+                  "| | path cost | expanded | time (ms) |", "| --- | ---: | ---: | ---: |"]
+        for alg, st in stats.items():
+            label = {"dijkstra": "Dijkstra", "astar": "A* + Manhattan", "alt": "A* + 4 landmarks"}[alg]
+            lines.append(f"| {label} | {st['cost']} | {st['expanded']} | {st['time_ms']:.2f} |")
+        lines.append("")
+        log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
+
     maps8 = out_dir / "maps8"
     maps8.mkdir(parents=True, exist_ok=True)
     lines += [

@@ -30,7 +30,8 @@ ALGO_COLORS = {
     "bfs": "#2a78d6",        # blue
     "astar": "#eb6834",      # orange
     "dijkstra": "#1baf7a",   # aqua
-    "bidir": "#6250d6",      # violet
+    "alt": "#6250d6",        # violet: A* + landmarks (main method of the study)
+    "bidir": "#898781",      # neutral gray (appendix method, never shown next to landmarks)
     "jps": "#e87ba4",        # magenta (validated as the 5th slot after the four above)
 }
 
@@ -341,7 +342,8 @@ def bar_panels(title, panels, ylabel, subtitle=None, color=ALGO_COLORS["astar"],
         for i, v in enumerate(p["values"]):
             x = x0 + i * slot + (slot - bw) / 2
             y = ax_y(v)
-            svg.add(f'<path d="{_bar_path(x, bw, ax_y(ylo), y)}" fill="{p.get("color", color)}">'
+            fill = p["colors"][i] if p.get("colors") else p.get("color", color)
+            svg.add(f'<path d="{_bar_path(x, bw, ax_y(ylo), y)}" fill="{fill}">'
                     f'<title>{escape(p["title"])} | {escape(p["categories"][i])}: {v:.4g}</title></path>')
             if p.get("labels"):
                 svg.text(x + bw / 2, y - 5, p["labels"][i], size=10, color=INK_2, anchor="middle")

@@ -159,6 +159,25 @@ def build(results_dir):
         txt += f"from {loss} it is slower. " if loss else "it stays faster at every jam level. "
         txt += f"At {last['astar']['label']}, the fastest optimal search is {NAMES[best_last]}."
         lines.append(txt)
+    hq_rows = load(results_dir, "HQ")
+    if hq_rows:
+        from analyze import HQ_MAPS, hq_table
+        table = hq_table(hq_rows)
+        lines += ["", "## Heuristic quality (main experiment)", ""]
+        rows = []
+        for kind, algs in table.items():
+            alts = sorted((a for a in algs if a.startswith("alt")), key=lambda a: int(a[3:]))
+            best = min(alts, key=lambda a: algs[a]["time"])
+            d, m, b = algs["dijkstra"], algs["astar"], algs[best]
+            saved = d["time"] - b["time"]
+            rows.append([HQ_MAPS.get(kind, kind), f"{m['accuracy']:.0%}", f"{m['work']:.0f}%",
+                         f"{best[3:]}", f"{b['accuracy']:.0%}", f"{b['work']:.1f}%",
+                         f"{d['time'] / b['time']:.1f}x", f"{b['prep'] / saved:.0f}" if saved > 0 else "-"])
+        lines += [md_table(["map", "Manhattan accuracy", "Manhattan cells vs Dijkstra", "best landmark count",
+                            "landmark accuracy", "landmark cells vs Dijkstra", "landmark speed-up over Dijkstra",
+                            "queries to pay off precompute"], rows, ["---"] + ["---:"] * 7), ""]
+        lines.append("- Landmarks need precomputation (one Dijkstra per landmark), so they pay off only when the "
+                     "same map answers several queries; see the last column.")
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)

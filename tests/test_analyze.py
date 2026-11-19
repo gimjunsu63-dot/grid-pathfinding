@@ -38,6 +38,12 @@ class TestChartHelpers(unittest.TestCase):
         ET.fromstring(p.render())
         ET.fromstring(bar_chart("t", ["a", "b\nc"], [dict(label="s", color="#000", values=[1, 2])], "y"))
 
+    def test_linear_fit(self):
+        a, b, r2 = analyze.linear_fit([1, 2, 4, 8], [12, 14, 18, 26])
+        self.assertAlmostEqual(a, 10)
+        self.assertAlmostEqual(b, 2)
+        self.assertAlmostEqual(r2, 1)
+
     def test_slope(self):
         self.assertAlmostEqual(analyze.slope([1, 10, 100], [3, 30, 300]), 1.0)
         self.assertAlmostEqual(analyze.slope([1, 10, 100], [1, 100, 10000]), 2.0)
@@ -54,7 +60,9 @@ class TestAnalyze(unittest.TestCase):
             charts = sorted(p.name for p in (out / "charts").glob("*.svg"))
             for name in ("A_time.svg", "B_share.svg", "C_time.svg", "D_bfs_cost.svg", "E_share.svg",
                          "decomposition.svg", "per_cell.svg", "heuristic_accuracy.svg", "noise.svg",
-                         "T_expanded.svg", "W_tradeoff.svg", "H_time.svg", "BI_expanded.svg"):
+                         "T_expanded.svg", "W_tradeoff.svg", "H_time.svg", "BI_expanded.svg",
+                         "HQ_curve_random.svg", "HQ_curve_maze.svg", "HQ_curve_city.svg", "HQ_time.svg",
+                         "HQ_prep.svg", "HQ_per_cell.svg"):
                 self.assertIn(name, charts)
             for p in (out / "charts").glob("*.svg"):
                 ET.fromstring(p.read_text())
@@ -63,6 +71,7 @@ class TestAnalyze(unittest.TestCase):
                 self.assertIn(f"charts/{name}", text)
             short = summary.build(res)
             self.assertIn("Who is fastest where", short)
+            self.assertIn("Heuristic quality", short)
             self.assertIn("Time per expanded cell", short)
 
     def test_code_lines_skips_docstring_and_comments(self):

@@ -12,6 +12,8 @@ Experiments (see EXPERIMENTS below):
     BI          bidirectional Dijkstra vs Dijkstra and A*
     O           8-directional moves (octile heuristic) and Jump Point Search
     J           traffic jams: share of jammed road cells in a city, 0% to 50%
+    HQ          heuristic quality: Dijkstra, A* + Manhattan, A* + landmarks (1-16),
+                and the accuracy ruler h = k x real remaining cost
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -34,6 +36,10 @@ Reference values stored with every row (computed once per map, not timed):
   reachable     open cells reachable from start
   manhattan     Manhattan distance start -> goal (= A*'s h at the start)
   optimal_cost  optimal path cost (from Dijkstra), empty if no path
+
+Per algorithm and map (not timed as search time):
+  prep_ms       precomputation before the search (landmark distances, ruler), 0 if none
+  h_accuracy    mean over cells of h(v) / real remaining cost (4-direction maps only)
 """
 
 import argparse
@@ -47,6 +53,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -55,6 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bidirectional import bidirectional_dijkstra  # noqa: E402
 from grid import Grid8, manhattan  # noqa: E402
 from jps import jump_point_search  # noqa: E402
+from landmarks import OracleHeuristic, accuracy, landmark_heuristic, remaining_to_goal  # noqa: E402
 from maps import component, make_map, open_cell_count  # noqa: E402
 from search import astar, bfs, dijkstra  # noqa: E402
 
@@ -64,15 +72,45 @@ N_MAPS = 10
 REPEATS = 5
 NOISE_REPEATS = 30
 
-# label -> (function, rule[, requirement]). Rules for check():
-#   "exact"     must return the optimal cost
-#   "any"       must find a path when one exists, never cheaper than optimal (BFS)
-#   float w     must stay within w * optimal (weighted A*)
-# Requirement "uniform": only run on maps where every open cell costs 1 (JPS).
+@dataclass(frozen=True)
+class Spec:
+    """How to run and check one algorithm.
+
+    fn         fn(grid, start, goal), or fn(grid, start, goal, state) when prepare is set
+    rule       check() rule: "exact" = optimal cost, "any" = a path no cheaper than optimal
+               (BFS), float w = at most w x optimal (weighted A*)
+    needs      "uniform": only run where every open cell costs 1 (JPS)
+    prepare    prepare(grid, start, goal) -> state, run once per map; its time is prep_ms
+    heuristic  heuristic(grid, goal_index, state) -> h(v, t), used for h_accuracy
+    """
+    fn: object
+    rule: object = "exact"
+    needs: str = ""
+    prepare: object = None
+    heuristic: object = None
+
+
+def as_spec(v):
+    """Algorithm tables may hold plain (fn, rule[, needs]) tuples."""
+    return v if isinstance(v, Spec) else Spec(v[0], v[1], v[2] if len(v) > 2 else "")
+
+
+def _h_zero(grid, t, state):
+    return lambda v, goal: 0
+
+
+def _h_grid(grid, t, state):
+    return grid.heuristic
+
+
+def _h_state(grid, t, state):
+    return state
+
+
 MAIN = {
-    "bfs": (bfs, "any"),
-    "dijkstra": (dijkstra, "exact"),
-    "astar": (astar, "exact"),
+    "bfs": Spec(bfs, "any"),
+    "dijkstra": Spec(dijkstra, heuristic=_h_zero),
+    "astar": Spec(astar, heuristic=_h_grid),
 }
 TIE = {f"astar_{tb}": (partial(astar, tie_break=tb), "exact") for tb in ("high_g", "low_g", "fifo")}
 WEIGHTS = (1, 1.5, 2, 3, 5)
@@ -105,6 +143,33 @@ TRAFFIC = {
     "bidir": (bidirectional_dijkstra, "exact"),
 }
 JAM_RATIOS = (0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5)
+
+
+def search_with(grid, start, goal, state):
+    """A* using a prepared heuristic object (landmarks or the ruler)."""
+    return astar(grid, start, goal, heuristic=state)
+
+
+def prepare_landmarks(grid, start, goal, count):
+    return landmark_heuristic(grid, start, count, placement="farthest")
+
+
+def prepare_ruler(grid, start, goal, k):
+    t = grid.index(goal)
+    return OracleHeuristic(remaining_to_goal(grid, t), t, k)
+
+
+LANDMARK_COUNTS = (1, 2, 4, 8, 16)
+RULER_KS = (0.25, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0, 1.2, 1.5)
+HQ = {
+    "dijkstra": Spec(dijkstra, heuristic=_h_zero),
+    "astar": Spec(astar, heuristic=_h_grid),
+}
+HQ.update({f"alt{n}": Spec(search_with, prepare=partial(prepare_landmarks, count=n), heuristic=_h_state)
+           for n in LANDMARK_COUNTS})
+HQ.update({f"ruler{k:g}": Spec(search_with, "exact" if k <= 1 else float(k),
+                               prepare=partial(prepare_ruler, k=k), heuristic=_h_state)
+           for k in RULER_KS})
 
 # Baseline condition: change one thing at a time away from this.
 BASE = dict(kind="random", size=200, wall_ratio=0.2, weighted=False, endpoints="fixed")
@@ -197,6 +262,13 @@ EXPERIMENTS = {
         cond(moves=8, weighted=True),
     ]),
     "J": ("traffic jams in a city", TRAFFIC, [jam(p) for p in JAM_RATIOS]),
+    # Landmarks are computed once per map and serve any query, so start and goal are random
+    # (fixed corners would put the first landmark right on the start or the goal).
+    "HQ": ("heuristic quality: ruler, Manhattan, landmarks", HQ, [
+        cond(weighted=True, endpoints="random"),
+        cond(kind="maze", endpoints="random"),
+        dict(jam(0.2), endpoints="random"),
+    ]),
 }
 
 FIELDS = [
@@ -205,6 +277,7 @@ FIELDS = [
     "open_cells", "reachable", "manhattan", "h_start", "optimal_cost",
     "rep", "order", "algorithm",
     "time_ms", "found", "cost", "steps", "expanded", "stale", "max_frontier", "scanned",
+    "prep_ms", "h_accuracy",
 ]
 
 
@@ -319,14 +392,43 @@ def map_info(exp, c, case, params, grid):
     return info, optimal
 
 
+def prepare_all(specs, case):
+    """Run every prepare step once (timed as prep_ms) and measure heuristic accuracy."""
+    grid = case.grid
+    calls, prep, acc = {}, {}, {}
+    for name, sp in specs.items():
+        if sp.prepare is None:
+            calls[name] = sp.fn
+            continue
+        gc.collect()
+        gc.disable()
+        try:
+            t0 = time.perf_counter_ns()
+            state = sp.prepare(grid, case.start, case.goal)
+            prep[name] = (time.perf_counter_ns() - t0) / 1e6
+        finally:
+            gc.enable()
+        calls[name] = partial(sp.fn, state=state)
+        calls[name].state = state
+    if grid.moves == 4 and any(sp.heuristic for sp in specs.values()):
+        t = grid.index(case.goal)
+        rem = remaining_to_goal(grid, t)                    # not timed
+        for name, sp in specs.items():
+            if sp.heuristic:
+                acc[name] = accuracy(sp.heuristic(grid, t, getattr(calls[name], "state", None)), t, rem)
+    return calls, prep, acc
+
+
 def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
-    names = list(algos)
+    specs = {name: as_spec(v) for name, v in algos.items()}
+    calls, prep, acc = prepare_all(specs, case)
+    names = list(specs)
     for rep in range(repeats):
         k = rep % len(names)
         order = names[k:] + names[:k]
         for pos, name in enumerate(order):
-            fn, rule = algos[name][:2]
-            result, ms = timed_run(fn, case.grid, case.start, case.goal)
+            rule = specs[name].rule
+            result, ms = timed_run(calls[name], case.grid, case.start, case.goal)
             check(name, result, optimal, case, rule)
             writer.writerow(dict(
                 info, rep=rep, order=pos, algorithm=name, time_ms=f"{ms:.4f}",
@@ -335,6 +437,8 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
                 steps="" if result.path is None else len(result.path) - 1,
                 expanded=result.expanded, stale=result.stale,
                 max_frontier=result.max_frontier, scanned=result.scanned,
+                prep_ms=f"{prep[name]:.4f}" if name in prep else 0,
+                h_accuracy="" if acc.get(name) is None else f"{acc[name]:.5f}",
             ))
             times[name].append(ms)
             expanded[name].append(result.expanded)
@@ -342,7 +446,7 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
 
 
 def run_condition(exp, algos, c, n_maps, repeats, writer, log=print):
-    algos = {k: v for k, v in algos.items() if not (len(v) > 2 and v[2] == "uniform" and not is_uniform(c))}
+    algos = {k: v for k, v in algos.items() if not (as_spec(v).needs == "uniform" and not is_uniform(c))}
     times = {a: [] for a in algos}
     expanded = {a: [] for a in algos}
     rows = 0
@@ -377,11 +481,11 @@ def run_noise(n_repeats, writer, size=200, log=print):
 def warm_up():
     case, _ = build_map(cond(size=50), BASE_SEED)
     case8, _ = build_map(cond(size=50, moves=8), BASE_SEED)
-    for algos in (MAIN, TIE, WEIGHTED, HEAP, BIDIR, TRAFFIC):
-        for spec in algos.values():
-            spec[0](case.grid, case.start, case.goal)
-    for spec in MOVES8.values():
-        spec[0](case8.grid, case8.start, case8.goal)
+    for algos, c in ((MAIN, case), (TIE, case), (WEIGHTED, case), (HEAP, case), (BIDIR, case),
+                     (TRAFFIC, case), (MOVES8, case8), (HQ, case)):
+        calls, _, _ = prepare_all({n: as_spec(v) for n, v in algos.items()}, c)
+        for fn in calls.values():
+            fn(c.grid, c.start, c.goal)
 
 
 def quick_version(conditions):

@@ -105,7 +105,7 @@ HEAPS = {
 
 
 def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="high_g",
-               heap_impl="heapq"):
+               heap_impl="heapq", heuristic=None):
     """Pop the cell with smallest f = g + weight * h.
 
     use_heuristic=False -> h = 0 -> Dijkstra.
@@ -115,6 +115,8 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
         "low_g"  prefer smaller g
         "fifo"   insertion order
     heap_impl picks the priority queue: "heapq" (default) or "python".
+    heuristic: optional function h(cell_index, goal_index) to use instead of the
+    grid's own (Manhattan / octile), e.g. the landmark heuristic.
     Neither has decrease-key, so a cell may be pushed more than once;
     outdated entries are skipped when popped (lazy deletion).
     """
@@ -131,7 +133,7 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
     t = grid.index(goal)
 
     if use_heuristic:
-        h_dist = grid.heuristic        # Manhattan on Grid, octile on Grid8
+        h_dist = heuristic if heuristic is not None else grid.heuristic   # Manhattan / octile by default
 
         def h(idx):
             return weight * h_dist(idx, t)
@@ -189,9 +191,9 @@ def dijkstra(grid, start, goal, tie_break="high_g", heap_impl="heapq"):
                       heap_impl=heap_impl)
 
 
-def astar(grid, start, goal, weight=1.0, tie_break="high_g", heap_impl="heapq"):
+def astar(grid, start, goal, weight=1.0, tie_break="high_g", heap_impl="heapq", heuristic=None):
     return best_first(grid, start, goal, use_heuristic=True, weight=weight,
-                      tie_break=tie_break, heap_impl=heap_impl)
+                      tie_break=tie_break, heap_impl=heap_impl, heuristic=heuristic)
 
 
 ALGORITHMS = {
