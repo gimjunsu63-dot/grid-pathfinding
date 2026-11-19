@@ -219,7 +219,7 @@ def manhattan(grid, a_idx, b_idx):
     return abs(ar - br) + abs(ac - bc)
 
 
-def octile(grid, a_idx, b_idx):
+def octile(grid, start, goal):
     """Octile distance between two flat indices, in Grid8 units (straight 10, diagonal 14).
 
     The cheapest way to cover the row difference dr and the column difference dc
@@ -229,9 +229,14 @@ def octile(grid, a_idx, b_idx):
 
     Example: dr = 3, dc = 5 -> 3 diagonal + 2 straight = 3 * 14 + 2 * 10 = 62.
     """
-    # TODO: write this function yourself. Instructions: docs/todo_octile.md
-    # Check it with: python3 -m unittest tests.test_moves8 -k Octile -v
-    raise NotImplementedError("octile() is not written yet - see docs/todo_octile.md")
+    sr, sc = divmod(start, grid.width)
+    gr, gc = divmod(goal, grid.width)
+    dr = abs(sr - gr)
+    dc = abs(sc - gc)
+    diag = min(dr, dc)
+    straight = max(dr, dc) - diag
+    return diag * DIAGONAL + straight * STRAIGHT
+
 
 
 def reconstruct_path(grid, parent, start_idx, goal_idx):
