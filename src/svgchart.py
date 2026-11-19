@@ -31,6 +31,7 @@ ALGO_COLORS = {
     "astar": "#eb6834",      # orange
     "dijkstra": "#1baf7a",   # aqua
     "bidir": "#6250d6",      # violet
+    "jps": "#e87ba4",        # magenta (validated as the 5th slot after the four above)
 }
 
 

@@ -1,6 +1,6 @@
 """Draw what each algorithm explored, as PNG images. Standard library only.
 
-    python3 src/visualize.py            # writes figures/maps/*.png + figures/README.md
+    python3 src/visualize.py            # writes figures/maps/*.png, figures/maps8/*.png + figures/README.md
 
 For every map kind, one PNG with three panels side by side:
     BFS | Dijkstra | A*
@@ -25,7 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench import timed_run  # noqa: E402
-from grid import WALL, Grid  # noqa: E402
+from grid import WALL, Grid, Grid8  # noqa: E402
+from jps import jump_point_search  # noqa: E402
 from maps import make_map  # noqa: E402
 from search import ALGORITHMS  # noqa: E402
 from svgchart import ALGO_COLORS  # noqa: E402
@@ -44,7 +45,8 @@ def _shade(rgb, amount):
 
 
 COLORS = {name: {"explored": _rgb(ALGO_COLORS[name]), "path": _shade(_rgb(ALGO_COLORS[name]), 0.45)}
-          for name in ("bfs", "dijkstra", "astar")}
+          for name in ("bfs", "dijkstra", "astar", "jps")}
+JUMP_POINT_COLOR = (20, 20, 20)
 WALL_COLOR = (45, 45, 45)
 START_COLOR = (220, 20, 60)
 GOAL_COLOR = (120, 40, 200)
@@ -65,9 +67,21 @@ class RecordingGrid(Grid):
         return super().neighbors(idx)
 
 
+class RecordingGrid8(Grid8):
+    """The same for 8-directional grids."""
+
+    def __init__(self, grid):
+        super().__init__(grid.height, grid.width, grid.costs)
+        self.order = []
+
+    def neighbors(self, idx):
+        self.order.append(idx)
+        return super().neighbors(idx)
+
+
 def explored_cells(name, grid, start, goal):
     """Run one algorithm and return (result, expanded cells in order)."""
-    rec = RecordingGrid(grid)
+    rec = RecordingGrid8(grid) if grid.moves == 8 else RecordingGrid(grid)
     result = ALGORITHMS[name](rec, start, goal)
     order = list(rec.order)
     if result.found and start != goal:
@@ -169,6 +183,35 @@ def draw_case(case, path_png, panel_px=360):
     return stats
 
 
+def draw_case8(case, path_png, panel_px=360):
+    """8 directions: Dijkstra | A* | JPS. JPS shows scanned cells (tint) and jump points (dark)."""
+    grid = Grid8.from_grid(case.grid)
+    px = max(1, panel_px // max(grid.width, grid.height))
+    pw, ph = grid.width * px, grid.height * px
+    canvas = Canvas(3 * pw + 4 * GAP, ph + 2 * GAP)
+    stats = {}
+    for k, name in enumerate(("dijkstra", "astar")):
+        result, order = explored_cells(name, grid, case.start, case.goal)
+        _, ms = timed_run(ALGORITHMS[name], grid, case.start, case.goal)
+        draw_panel(canvas, GAP + k * (pw + GAP), GAP, px, grid, case.start, case.goal,
+                   order, result.path, COLORS[name])
+        stats[name] = dict(found=result.found, cost=result.cost, expanded=result.expanded,
+                           scanned=0, time_ms=ms)
+    trace = {}
+    result = jump_point_search(grid, case.start, case.goal, trace=trace)
+    _, ms = timed_run(jump_point_search, grid, case.start, case.goal)
+    ox = GAP + 2 * (pw + GAP)
+    scanned = [grid.index(p) for p in trace["scanned"]]
+    draw_panel(canvas, ox, GAP, px, grid, case.start, case.goal, scanned, result.path, COLORS["jps"])
+    inset = max(1, px // 4)
+    for r, c in trace["jump_points"]:
+        canvas.rect(ox + c * px + inset, GAP + r * px + inset, px - 2 * inset, px - 2 * inset, JUMP_POINT_COLOR)
+    stats["jps"] = dict(found=result.found, cost=result.cost, expanded=result.expanded,
+                        scanned=result.scanned, time_ms=ms)
+    canvas.save_png(path_png)
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # gallery
 # ---------------------------------------------------------------------------
@@ -185,7 +228,14 @@ GALLERY = [
     ("city", "City blocks (arterial 1, local road 3, jam 9)", dict(block=6)),
 ]
 
-LABELS = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*"}
+GALLERY8 = [
+    ("random", "8 directions: random obstacles 20%", dict(wall_ratio=0.2)),
+    ("uwall", "8 directions: U-shaped wall", {}),
+    ("city", "8 directions: city blocks, every road cost 1", dict(block=6, weighted=False)),
+    ("maze-loops", "8 directions: maze with loops", dict(kind="maze", loop_ratio=0.1)),
+]
+
+LABELS = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "jps": "JPS"}
 
 
 def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
@@ -224,6 +274,29 @@ def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
             steps = s["steps"] if s["found"] else "-"
             lines.append(f"| {LABELS[alg]} | {cost} | {steps} | {s['expanded']} | "
                          f"{s['max_frontier']} | {s['time_ms']:.2f} |")
+        lines.append("")
+        log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
+    maps8 = out_dir / "maps8"
+    maps8.mkdir(parents=True, exist_ok=True)
+    lines += [
+        "# 8 directions and Jump Point Search", "",
+        "Left to right: **Dijkstra | A* (octile distance) | JPS**. Costs are in 8-direction units "
+        "(straight 10, diagonal 14).", "",
+        "In the JPS panel the magenta tint marks cells JPS only *looked at* while jumping, "
+        "and the black squares are the jump points it actually put on the heap.", "",
+    ]
+    for name, title, params in GALLERY8:
+        params = dict(params)
+        kind = params.pop("kind", name)
+        case = make_map(kind, size, seed, **params)
+        png = maps8 / f"{name}.png"
+        stats = draw_case8(case, png)
+        lines += [f"## {title}", "", f"![{name}](maps8/{png.name})", "",
+                  "| | path cost | expanded (JPS: jump points) | scanned while jumping | time (ms) |",
+                  "| --- | ---: | ---: | ---: | ---: |"]
+        for alg, st in stats.items():
+            cost = st["cost"] if st["found"] else "no path"
+            lines.append(f"| {LABELS[alg]} | {cost} | {st['expanded']} | {st['scanned'] or '-'} | {st['time_ms']:.2f} |")
         lines.append("")
         log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
     (out_dir / "README.md").write_text("\n".join(lines))

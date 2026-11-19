@@ -10,6 +10,8 @@ Experiments (see EXPERIMENTS below):
     W           weighted A* (h multiplied by 1, 1.5, 2, 3, 5)
     H           heapq (C) vs a plain-Python binary heap
     BI          bidirectional Dijkstra vs Dijkstra and A*
+    O           8-directional moves (octile heuristic) and Jump Point Search
+    J           traffic jams: share of jammed road cells in a city, 0% to 50%
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -51,7 +53,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bidirectional import bidirectional_dijkstra  # noqa: E402
-from grid import manhattan  # noqa: E402
+from grid import Grid8, manhattan  # noqa: E402
+from jps import jump_point_search  # noqa: E402
 from maps import component, make_map, open_cell_count  # noqa: E402
 from search import astar, bfs, dijkstra  # noqa: E402
 
@@ -61,10 +64,11 @@ N_MAPS = 10
 REPEATS = 5
 NOISE_REPEATS = 30
 
-# label -> (function, rule). Rules for check():
+# label -> (function, rule[, requirement]). Rules for check():
 #   "exact"     must return the optimal cost
 #   "any"       must find a path when one exists, never cheaper than optimal (BFS)
 #   float w     must stay within w * optimal (weighted A*)
+# Requirement "uniform": only run on maps where every open cell costs 1 (JPS).
 MAIN = {
     "bfs": (bfs, "any"),
     "dijkstra": (dijkstra, "exact"),
@@ -87,6 +91,21 @@ BIDIR = {
     "bidir": (bidirectional_dijkstra, "exact"),
 }
 
+MOVES8 = {
+    "bfs": (bfs, "any"),             # fewest moves is not cheapest once diagonals cost more
+    "dijkstra": (dijkstra, "exact"),
+    "astar": (astar, "exact"),
+    "bidir": (bidirectional_dijkstra, "exact"),
+    "jps": (jump_point_search, "exact", "uniform"),
+}
+TRAFFIC = {
+    "bfs": (bfs, "any"),
+    "dijkstra": (dijkstra, "exact"),
+    "astar": (astar, "exact"),
+    "bidir": (bidirectional_dijkstra, "exact"),
+}
+JAM_RATIOS = (0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5)
+
 # Baseline condition: change one thing at a time away from this.
 BASE = dict(kind="random", size=200, wall_ratio=0.2, weighted=False, endpoints="fixed")
 
@@ -101,6 +120,15 @@ def cond(**changes):
         c.pop("wall_ratio", None)
         c.pop("weighted", None)
     return c
+
+
+def is_uniform(c):
+    return not c.get("weighted") and c["kind"] != "terrain"
+
+
+def jam(p):
+    """City where every road costs 1 except jammed cells (cost 9): only the jam share changes."""
+    return cond(kind="city", weighted=True, local_cost=1, jam_arterials=True, jam_ratio=p)
 
 
 # name -> (title, algorithm set, conditions)
@@ -159,14 +187,24 @@ EXPERIMENTS = {
         cond(kind="terrain"),
         cond(kind="city", weighted=True),
     ]),
+    "O": ("8-directional moves and Jump Point Search", MOVES8, [
+        cond(moves=8, wall_ratio=0.0),
+        cond(moves=8),
+        cond(moves=8, kind="maze"),
+        cond(moves=8, kind="nopath"),
+        cond(moves=8, kind="uwall", wall_ratio=0.0),
+        cond(moves=8, kind="city", weighted=False),
+        cond(moves=8, weighted=True),
+    ]),
+    "J": ("traffic jams in a city", TRAFFIC, [jam(p) for p in JAM_RATIOS]),
 }
 
 FIELDS = [
     "experiment", "condition", "kind", "size", "params", "endpoints",
     "map_index", "seed", "attempts", "start", "goal",
-    "open_cells", "reachable", "manhattan", "optimal_cost",
+    "open_cells", "reachable", "manhattan", "h_start", "optimal_cost",
     "rep", "order", "algorithm",
-    "time_ms", "found", "cost", "steps", "expanded", "stale", "max_frontier",
+    "time_ms", "found", "cost", "steps", "expanded", "stale", "max_frontier", "scanned",
 ]
 
 
@@ -227,7 +265,9 @@ def timed_run(fn, grid, start, goal):
 
 def condition_label(c):
     parts = [c["kind"], str(c["size"])]
-    for key in ("wall_ratio", "loop_ratio"):
+    if c.get("moves") == 8:
+        parts.append("8dir")
+    for key in ("wall_ratio", "loop_ratio", "jam_ratio"):
         if key in c:
             parts.append(f"{key.split('_')[0]}{c[key]}")
     if c["kind"] == "terrain":
@@ -239,8 +279,12 @@ def condition_label(c):
 
 
 def build_map(c, seed):
-    params = {k: v for k, v in c.items() if k not in ("kind", "size", "endpoints")}
-    return make_map(c["kind"], c["size"], seed, endpoints=c["endpoints"], **params), params
+    params = {k: v for k, v in c.items() if k not in ("kind", "size", "endpoints", "moves")}
+    case = make_map(c["kind"], c["size"], seed, endpoints=c["endpoints"], **params)
+    if c.get("moves") == 8:
+        case.grid = Grid8.from_grid(case.grid)
+        params = dict(params, moves=8)
+    return case, params
 
 
 def check(name, result, optimal, case, rule="exact"):
@@ -269,6 +313,7 @@ def map_info(exp, c, case, params, grid):
         start=f"{case.start[0]} {case.start[1]}", goal=f"{case.goal[0]} {case.goal[1]}",
         open_cells=open_cell_count(grid), reachable=len(component(grid, case.start)),
         manhattan=manhattan(grid, grid.index(case.start), grid.index(case.goal)),
+        h_start=grid.heuristic(grid.index(case.start), grid.index(case.goal)),
         optimal_cost="" if optimal is None else optimal,
     )
     return info, optimal
@@ -280,7 +325,7 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
         k = rep % len(names)
         order = names[k:] + names[:k]
         for pos, name in enumerate(order):
-            fn, rule = algos[name]
+            fn, rule = algos[name][:2]
             result, ms = timed_run(fn, case.grid, case.start, case.goal)
             check(name, result, optimal, case, rule)
             writer.writerow(dict(
@@ -289,7 +334,7 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
                 cost="" if result.cost is None else result.cost,
                 steps="" if result.path is None else len(result.path) - 1,
                 expanded=result.expanded, stale=result.stale,
-                max_frontier=result.max_frontier,
+                max_frontier=result.max_frontier, scanned=result.scanned,
             ))
             times[name].append(ms)
             expanded[name].append(result.expanded)
@@ -297,6 +342,7 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
 
 
 def run_condition(exp, algos, c, n_maps, repeats, writer, log=print):
+    algos = {k: v for k, v in algos.items() if not (len(v) > 2 and v[2] == "uniform" and not is_uniform(c))}
     times = {a: [] for a in algos}
     expanded = {a: [] for a in algos}
     rows = 0
@@ -330,9 +376,12 @@ def run_noise(n_repeats, writer, size=200, log=print):
 
 def warm_up():
     case, _ = build_map(cond(size=50), BASE_SEED)
-    for algos in (MAIN, TIE, WEIGHTED, HEAP, BIDIR):
-        for fn, _ in algos.values():
-            fn(case.grid, case.start, case.goal)
+    case8, _ = build_map(cond(size=50, moves=8), BASE_SEED)
+    for algos in (MAIN, TIE, WEIGHTED, HEAP, BIDIR, TRAFFIC):
+        for spec in algos.values():
+            spec[0](case.grid, case.start, case.goal)
+    for spec in MOVES8.values():
+        spec[0](case8.grid, case8.start, case8.goal)
 
 
 def quick_version(conditions):

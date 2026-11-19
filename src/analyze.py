@@ -31,13 +31,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bidirectional  # noqa: E402
+import jps  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import search  # noqa: E402
 from svgchart import ALGO_COLORS, INK_2, MUTED, LinePlot, bar_chart, bar_panels, tint  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ["bfs", "dijkstra", "astar"]
-NAMES = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "bidir": "Bidirectional"}
+NAMES = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "bidir": "Bidirectional", "jps": "JPS"}
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,8 @@ def load(results_dir, exp):
             r["time_ms"] = float(r["time_ms"])
             r["cost"] = int(r["cost"]) if r["cost"] else None
             r["optimal_cost"] = int(r["optimal_cost"]) if r["optimal_cost"] else None
+            r["h_start"] = int(r["h_start"]) if r.get("h_start") else None
+            r["scanned"] = int(r["scanned"]) if r.get("scanned") else 0
             rows.append(r)
     return rows
 
@@ -74,6 +77,8 @@ def short_label(r):
         s = "no path"
     elif kind == "uwall":
         s = "U wall"
+    elif kind == "city" and p.get("local_cost") == 1 and p.get("weighted"):
+        return f"jams {round(p.get('jam_ratio', 0) * 100)}%"
     else:
         s = kind
     if kind != "terrain" and p.get("weighted"):
@@ -112,6 +117,7 @@ def summarize(rows):
                 share=statistics.median(r["expanded"] / r["reachable"] for r in rs if r["reachable"]),
                 stale=statistics.median(r["stale"] for r in rs),
                 frontier=statistics.median(r["max_frontier"] for r in rs),
+                scanned=statistics.median(r["scanned"] for r in rs),
                 cost_ratio=statistics.mean(ratios) if ratios else None,
                 cost_ratio_max=max(ratios) if ratios else None,
                 per_cell=statistics.median(per_cell) if per_cell else None,
@@ -207,6 +213,8 @@ def code_size_table():
          bf + code_lines(search.astar) + code_lines(grid_mod.manhattan)],
         ["Bidirectional Dijkstra", "`bidirectional_dijkstra`",
          code_lines(bidirectional.bidirectional_dijkstra)],
+        ["JPS", "`jump_point_search` + `_expand_path`",
+         code_lines(jps.jump_point_search) + code_lines(jps._expand_path)],
         ["shared by all", "`Grid.neighbors`, `reconstruct_path`, `_trivial`", shared],
     ]
     note = ("Dijkstra and A* share `best_first`, which also carries the options used in the "
@@ -226,8 +234,8 @@ def algo_series(summary, algs, key, conds=None, lo_key=None, hi_key=None, scale=
         vals = [summary[c][a][key] * scale if a in summary[c] else None for c in conds]
         s = dict(label=NAMES.get(a, a), color=ALGO_COLORS.get(a, MUTED), values=vals)
         if lo_key:
-            s["lo"] = [summary[c][a][lo_key] * scale for c in conds]
-            s["hi"] = [summary[c][a][hi_key] * scale for c in conds]
+            s["lo"] = [summary[c][a][lo_key] * scale if a in summary[c] else None for c in conds]
+            s["hi"] = [summary[c][a][hi_key] * scale if a in summary[c] else None for c in conds]
         out.append(s)
     return out
 
@@ -305,7 +313,7 @@ def chart_decomposition(maps, out):
 
 
 def chart_per_cell(per_cell, out):
-    cats = ["unit cost", "cost 1-9"]
+    cats = [c for c in ("unit cost", "cost 1-9") if all(per_cell.get((a, c)) for a in MAIN)]
     series = []
     for a in MAIN:
         vals, lo, hi = [], [], []
@@ -431,6 +439,45 @@ def chart_bidir(summary, out):
         "time (ms, log)", ylog=True, width=900, subtitle="200 x 200. Median of 10 maps x 5 runs; whiskers show IQR."))
 
 
+def chart_moves8(summary, out):
+    cats = [summary[c]["dijkstra"]["label"] for c in summary]
+    algs = ["bfs", "dijkstra", "astar", "bidir", "jps"]
+    sub = "8-directional moves, 200 x 200. JPS runs only where every cost is 1."
+    (out / "O_expanded.svg").write_text(bar_chart(
+        "8 directions: cells taken off the heap", cats, algo_series(summary, algs, "expanded"),
+        "expanded cells (log)", ylog=True, width=1000, subtitle=sub + " For JPS these are jump points."))
+    (out / "O_time.svg").write_text(bar_chart(
+        "8 directions: search time", cats,
+        algo_series(summary, algs, "time", lo_key="time_q1", hi_key="time_q3"),
+        "time (ms, log)", ylog=True, width=1000, subtitle=sub + " Whiskers show IQR."))
+
+
+def chart_traffic(summary, out):
+    conds = list(summary)
+    xs = list(range(len(conds)))
+    labels = {i: summary[c]["dijkstra"]["label"].replace("jams ", "") for i, c in enumerate(conds)}
+    fmt = lambda v: labels.get(int(round(v)), "") if abs(v - round(v)) < 1e-9 else ""  # noqa: E731
+    p = LinePlot("Traffic jams: when does A* lose its lead?", "share of jammed road cells (not to scale)",
+                 "time (ms)", xticks=xs, xfmt=fmt, xlim=(-0.3, len(xs) - 0.7),
+                 subtitle="City 200 x 200, every road costs 1, a jammed cell costs 9. Median of 10 maps x 5 runs.")
+    for a in ["bfs", "dijkstra", "astar", "bidir"]:
+        p.line(xs, [summary[c][a]["time"] for c in conds], ALGO_COLORS[a], NAMES[a], end_label=NAMES[a],
+               lo=[summary[c][a]["time_q1"] for c in conds], hi=[summary[c][a]["time_q3"] for c in conds])
+    (out / "J_time.svg").write_text(p.render())
+    q = LinePlot("Why: jams make the Manhattan estimate inaccurate", "share of jammed road cells (not to scale)",
+                 "percent", xticks=xs, xfmt=fmt, xlim=(-0.3, len(xs) - 0.7), ylim=(0, 100),
+                 subtitle="Both lines are medians over the same maps.")
+    work, acc = [], []
+    for c in conds:
+        rows = [r["row"] for r in [summary[c]["astar"]]]
+        work.append(summary[c]["astar"]["expanded"] / summary[c]["dijkstra"]["expanded"] * 100)
+        r = rows[0]
+        acc.append(r["manhattan"] / r["optimal_cost"] * 100 if r["optimal_cost"] else 0)
+    q.line(xs, work, ALGO_COLORS["astar"], "A* cells as % of Dijkstra", end_label="A* work")
+    q.line(xs, acc, MUTED, "heuristic accuracy (Manhattan / optimal cost)", end_label="accuracy", dashed=True)
+    (out / "J_why.svg").write_text(q.render())
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -451,7 +498,8 @@ def environment_line(results_dir):
 def analyze(results_dir, out_dir, log=print):
     charts = out_dir / "charts"
     charts.mkdir(parents=True, exist_ok=True)
-    data = {exp: load(results_dir, exp) for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "noise")}
+    data = {exp: load(results_dir, exp)
+            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -508,9 +556,9 @@ def analyze(results_dir, out_dir, log=print):
         chart_per_cell(per_cell, charts)
         rows = []
         for a in MAIN:
-            u = statistics.median(per_cell[(a, "unit cost")])
-            w = statistics.median(per_cell[(a, "cost 1-9")])
-            rows.append([NAMES[a], f"{u:.2f}", f"{w:.2f}"])
+            u, w = (per_cell.get((a, k)) for k in ("unit cost", "cost 1-9"))
+            rows.append([NAMES[a], f"{statistics.median(u):.2f}" if u else "-",
+                         f"{statistics.median(w):.2f}" if w else "-"])
         section("Time decomposition", ["decomposition.svg", "per_cell.svg"],
                 md_table(["algorithm", "us per cell, unit cost", "us per cell, cost 1-9"], rows))
         chart_heuristic(maps, charts)
@@ -557,6 +605,22 @@ def analyze(results_dir, out_dir, log=print):
         chart_bidir(s, charts)
         section("BI. Bidirectional Dijkstra", ["BI_expanded.svg", "BI_time.svg"],
                 condition_table(s, ["dijkstra", "astar", "bidir"]))
+
+    if data["O"]:
+        s = summarize(data["O"])
+        chart_moves8(s, charts)
+        jrows = [[by["jps"]["label"].replace("\n", ", "), f"{by['jps']['expanded']:,.0f}", f"{by['jps']['scanned']:,.0f}",
+                  f"{by['astar']['expanded']:,.0f}", f"{by['jps']['time']:.2f}", f"{by['astar']['time']:.2f}"]
+                 for by in s.values() if "jps" in by]
+        section("O. 8-directional moves and Jump Point Search", ["O_expanded.svg", "O_time.svg"],
+                md_table(["condition", "JPS jump points", "JPS cells scanned", "A* expanded", "JPS ms", "A* ms"], jrows)
+                + "\n\n" + condition_table(s, ["bfs", "dijkstra", "astar", "bidir", "jps"]),
+                "Costs are in 8-direction units (straight step 10, diagonal 14). "
+                "JPS puts only jump points on the heap but scans many cells in between.")
+    if data["J"]:
+        s = summarize(data["J"])
+        chart_traffic(s, charts)
+        section("J. Traffic jams", ["J_time.svg", "J_why.svg"], condition_table(s, ["bfs", "dijkstra", "astar", "bidir"]))
 
     section("Code size", [], code_size_table(),
             "Lines of code without blank lines, comments and docstrings.")

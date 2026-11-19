@@ -23,7 +23,7 @@ from collections import deque
 from dataclasses import dataclass
 
 import binheap
-from grid import manhattan, path_cost, reconstruct_path
+from grid import path_cost, reconstruct_path
 
 
 @dataclass
@@ -33,6 +33,7 @@ class SearchResult:
     expanded: int = 0
     stale: int = 0
     max_frontier: int = 0
+    scanned: int = 0        # JPS only: cells looked at while jumping
 
     @property
     def found(self):
@@ -130,8 +131,10 @@ def best_first(grid, start, goal, use_heuristic=True, weight=1.0, tie_break="hig
     t = grid.index(goal)
 
     if use_heuristic:
+        h_dist = grid.heuristic        # Manhattan on Grid, octile on Grid8
+
         def h(idx):
-            return weight * manhattan(grid, idx, t)
+            return weight * h_dist(idx, t)
     else:
         def h(idx):
             return 0

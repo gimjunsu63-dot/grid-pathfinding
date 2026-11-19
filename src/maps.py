@@ -285,7 +285,8 @@ def terrain_map(height, width, seed, scale=None):
 
 
 def city_map(height, width, seed, block=6, arterial_every=4, weighted=True,
-             closure_ratio=0.05, jam_ratio=0.1, max_attempts=1000):
+             closure_ratio=0.05, jam_ratio=0.1, local_cost=3, jam_cost=9, jam_arterials=False,
+             max_attempts=1000):
     """Road grid between building blocks.
 
     Roads run every (block + 1) cells plus along the bottom and right edges.
@@ -294,6 +295,9 @@ def city_map(height, width, seed, block=6, arterial_every=4, weighted=True,
         local road                                     cost 3
         traffic jam (jam_ratio of local road cells)    cost 9
     With weighted=False every road cell costs 1.
+    local_cost, jam_cost and jam_arterials (jams on arterial roads too) change
+    those numbers; the traffic experiment uses local_cost=1, jam_arterials=True
+    so that jams are the only thing that differs between conditions.
     closure_ratio of road cells are closed (walls); if that disconnects start
     and goal, closures are drawn again and the attempt is counted.
     """
@@ -317,12 +321,15 @@ def city_map(height, width, seed, block=6, arterial_every=4, weighted=True,
                 base.append(WALL)
                 continue
             roads.append(r * width + c)
+            arterial = (road_r and is_arterial(r, height - 1)) or (road_c and is_arterial(c, width - 1))
             if not weighted:
                 base.append(1)
-            elif (road_r and is_arterial(r, height - 1)) or (road_c and is_arterial(c, width - 1)):
+            elif arterial and not jam_arterials:
                 base.append(1)
+            elif cost_rng.random() < jam_ratio:
+                base.append(jam_cost)
             else:
-                base.append(9 if cost_rng.random() < jam_ratio else 3)
+                base.append(1 if arterial else local_cost)
 
     start, goal = (0, 0), (height - 1, width - 1)
     keep = {0, height * width - 1}
@@ -334,7 +341,8 @@ def city_map(height, width, seed, block=6, arterial_every=4, weighted=True,
         grid = Grid(height, width, cells)
         if is_connected(grid, start, goal):
             return MapCase("city", grid, start, goal, seed, attempt,
-                           dict(block=block, weighted=weighted, closure_ratio=closure_ratio))
+                           dict(block=block, weighted=weighted, closure_ratio=closure_ratio,
+                                jam_ratio=jam_ratio, local_cost=local_cost))
     raise RuntimeError(f"no connected city map after {max_attempts} attempts")
 
 

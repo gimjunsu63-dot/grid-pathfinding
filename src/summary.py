@@ -134,6 +134,31 @@ def build(results_dir):
         lo, hi = min(r, key=r.get), max(r, key=r.get)
         lines.append(f"- Bidirectional Dijkstra: from {r[lo]:.1%} of Dijkstra's cells ({_label(s[lo]['bidir'])}) "
                      f"to {r[hi]:.0%} ({_label(s[hi]['bidir'])}).")
+    o_rows = load(results_dir, "O")
+    if o_rows:
+        s = summarize(o_rows)
+        unit = [by for by in s.values() if "jps" in by]
+        extras = [(by["bfs"]["cost_ratio"] - 1) * 100 for by in unit if by["bfs"]["cost_ratio"]]
+        if unit:
+            wins = sum(1 for by in unit if by["jps"]["time"] < by["astar"]["time"])
+            share = statistics.median(by["jps"]["expanded"] / by["astar"]["expanded"] for by in unit
+                                      if by["astar"]["expanded"])
+            lines.append(f"- 8 directions: BFS's path costs up to +{max(extras):.1f}% even when every cost is 1 "
+                         f"(a diagonal step costs more than a straight one). JPS takes {share:.0%} of A*'s cells "
+                         f"off the heap (median) but is faster than A* in {wins} of {len(unit)} maps, "
+                         "because it scans the cells between jump points.")
+    j_rows = load(results_dir, "J")
+    if j_rows:
+        s = summarize(j_rows)
+        conds = list(s)
+        first, last = s[conds[0]], s[conds[-1]]
+        loss = next((s[c]["astar"]["label"] for c in conds if s[c]["astar"]["time"] > s[c]["dijkstra"]["time"]), None)
+        best_last = min(("dijkstra", "astar", "bidir"), key=lambda a: last[a]["time"])
+        txt = (f"- Traffic jams: with no jams A* is {first['dijkstra']['time'] / first['astar']['time']:.1f}x faster "
+               f"than Dijkstra; ")
+        txt += f"from {loss} it is slower. " if loss else "it stays faster at every jam level. "
+        txt += f"At {last['astar']['label']}, the fastest optimal search is {NAMES[best_last]}."
+        lines.append(txt)
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)

@@ -4,9 +4,9 @@ Same inputs and SearchResult as the other algorithms. Works for unit and
 weighted maps.
 
 Costs are paid when ENTERING a cell, so the two directions pay differently:
-    forward  (from start)  moving cur -> nxt   costs cost[nxt]
+    forward  (from start)  moving cur -> nxt   costs move_cost(cur, nxt)
     backward (from goal)   moving cur -> nxt   means nxt -> cur going forward,
-                                               which costs cost[cur]
+                                               which costs move_cost(nxt, cur)
 With that, dist_f[x] + dist_b[x] is the cost of the best known path through x.
 
 Rules:
@@ -32,7 +32,7 @@ def bidirectional_dijkstra(grid, start, goal, heap_impl="heapq"):
     if quick is not None:
         return quick
     push, pop = HEAPS[heap_impl]
-    costs = grid.costs
+    move_cost = grid.move_cost       # backward side pays the forward move nxt -> cur
     s = grid.index(start)
     t = grid.index(goal)
 
@@ -60,10 +60,10 @@ def bidirectional_dijkstra(grid, start, goal, heap_impl="heapq"):
         expanded += 1
         my_dist, my_parent, my_heap = dist[side], parent[side], heaps[side]
         their_dist = dist[other]
-        for nxt, entry_cost in grid.neighbors(cur):
+        for nxt, step in grid.neighbors(cur):
             if nxt in closed[side]:
                 continue
-            ng = g + (entry_cost if side == 0 else costs[cur])
+            ng = g + (step if side == 0 else move_cost(nxt, cur))
             if ng < my_dist.get(nxt, float("inf")):
                 my_dist[nxt] = ng
                 my_parent[nxt] = cur
