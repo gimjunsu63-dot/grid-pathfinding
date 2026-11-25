@@ -122,13 +122,15 @@ class _Svg:
 
 
 def _legend(svg, items, x, y):
-    """items: list of (label, color, kind) with kind 'line' | 'box'. One row."""
+    """items: list of (label, color, kind) with kind 'line' | 'dashed' | 'box'. One row."""
     cx = x
     for label, color, kind in items:
-        if kind == "line":
-            svg.add(f'<line x1="{cx}" y1="{y - 4}" x2="{cx + 18}" y2="{y - 4}" stroke="{color}" stroke-width="2"/>')
-            svg.add(f'<circle cx="{cx + 9}" cy="{y - 4}" r="4" fill="{color}" stroke="{SURFACE}" stroke-width="2"/>')
-            cx += 24
+        if kind in ("line", "dashed"):
+            dash = ' stroke-dasharray="4 3"' if kind == "dashed" else ""   # same dash as the series it names
+            svg.add(f'<line x1="{cx}" y1="{y - 4}" x2="{cx + 22}" y2="{y - 4}" stroke="{color}" '
+                    f'stroke-width="2"{dash}/>')
+            svg.add(f'<circle cx="{cx + 11}" cy="{y - 4}" r="4" fill="{color}" stroke="{SURFACE}" stroke-width="2"/>')
+            cx += 29
         else:
             svg.add(f'<rect x="{cx}" y="{y - 10}" width="12" height="12" rx="3" fill="{color}"/>')
             cx += 17
@@ -240,7 +242,7 @@ class LinePlot:
                         f'stroke-width="2"><title>{escape(s["label"])}: {b:.4g} at {a:g}</title></circle>')
             if s["end_label"]:
                 svg.text(ax_x(s["xs"][-1]) + 8, ax_y(s["ys"][-1]) + 4, s["end_label"], size=11, color=INK_2)
-            legend.append((s["label"], c, "line"))
+            legend.append((s["label"], c, "dashed" if s["dashed"] else "line"))
 
         for a, b, s, anchor, dy in self.notes:
             svg.text(ax_x(a), ax_y(b) + dy, s, size=11, color=INK_2, anchor=anchor)

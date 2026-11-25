@@ -891,7 +891,7 @@ RB_SAFE = {"dijkstra": "always", "alt_now": "if traffic = model", "alt_night": "
 def _rb_style(alg):
     return {"dijkstra": (ALGO_COLORS["dijkstra"], False), "alt_now": (ALGO_COLORS["alt"], False),
             "alt_night": (tint(ALGO_COLORS["alt"], 0.5), True), "alt_band": (ALGO_COLORS["jps"], False),
-            "alt_band_safe": (ALGO_COLORS["jps"], True)}[alg]
+            "alt_band_safe": (tint(ALGO_COLORS["jps"], 0.4), True)}[alg]
 
 
 def rb_tables(rows):
