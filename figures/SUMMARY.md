@@ -72,4 +72,12 @@ Only algorithms that returned the optimal path can win a condition; BFS is exclu
 
 - 8h, 30 trips from the campus: Dijkstra 2.8 ms, A* + straight line 3.1 ms, landmarks measured that hour 0.7 ms (4.0x faster than Dijkstra).
 - Landmarks measured at 8h: used at 3h, 33% of trips got a longer route (worst +19.4%); used at 18h, 0% of trips got a longer route. Landmarks measured at night: optimal at every hour.
-- Measurement noise (IQR / median, same map 30 runs): BFS 17.0%, Dijkstra 8.9%, A* 19.5%.
+
+## Landmarks per time band (real road map)
+
+- 8h, traffic = model: landmarks measured now 0.60 ms, time band 1.40 ms, night 2.93 ms, Dijkstra 2.74 ms.
+- Traffic up to 10% off the model, longer routes over all hours: measured now 7.5%, night 0.6%, time band 3.3%, time band with margin 0.0%.
+
+## Measurement noise
+
+- IQR / median, same map 30 runs: BFS 17.0%, Dijkstra 8.9%, A* 19.5%.

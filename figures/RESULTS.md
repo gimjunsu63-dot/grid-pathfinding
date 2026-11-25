@@ -611,6 +611,24 @@ Map data (c) OpenStreetMap contributors, ODbL 1.0 (data/songdo_roads.json). Edge
 | 21h | landmarks measured at night (3h) | 1.53 | 305 | 77% | 0% | 0% | 0 | 125 |
 | 21h | landmarks measured at 8h | 0.62 | 96 | 131% | 90% | 47% | +14.8% | 107 |
 
+## RB. Landmarks per time band (real road map)
+
+Bands: morning 7-9h, day 10-16h, evening 17-20h, night 21-6h. Time-band landmarks are measured once per band on the cheapest hour of every segment over the band, so no hour of the band is cheaper (exact while traffic follows the model). The 10% margin multiplies those costs by 0.9, so a day up to 10% lighter than the model is not cheaper either. 'Traffic off': every query searches one day's traffic, each segment up to +-10% off the model (seeded); landmarks are always measured on the model.
+
+![RB_time.svg](charts/RB_time.svg)
+
+![RB_time_off.svg](charts/RB_time_off.svg)
+
+![RB_wrong.svg](charts/RB_wrong.svg)
+
+| method | exact | landmark sets a day | 8h ms (traffic = model) | 8h ms (traffic off) | 8h points (traffic off) | 8h accuracy (traffic off) | longer routes (traffic = model) | longer routes (traffic off) | worst extra (traffic off) | precompute ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dijkstra | always | - | 2.74 | 2.77 | 2,192 | - | 0.0% | 0.0% | 0 | - |
+| landmarks measured this hour | if traffic = model | 24 | 0.60 | 0.96 | 162 | 86% | 0.0% | 7.5% | +2.0% | 47 |
+| landmarks measured at night | if traffic = model | 1 | 2.93 | 3.37 | 775 | 54% | 0.0% | 0.6% | +0.7% | 130 |
+| landmarks of the time band | if traffic = model | 4 | 1.40 | 1.71 | 362 | 76% | 0.0% | 3.3% | +0.7% | 77 |
+| time band with 10% margin | if traffic within 10% of model | 4 | 2.12 | 2.44 | 539 | 68% | 0.0% | 0.0% | 0 | 86 |
+
 ## RY. Trips from Yonsei University International Campus
 
 Same map, traffic model and methods as RM, but every trip starts at the campus corner on Songdogwahak-ro (roads.YONSEI). 30 goals, the same at every hour.

@@ -20,9 +20,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 118 | 118 | 2826 | 53 | 2.13 |
-| Dijkstra | 118 | 118 | 2826 | 53 | 4.74 |
-| A* | 118 | 118 | 431 | 269 | 1.09 |
+| BFS | 118 | 118 | 2826 | 53 | 3.07 |
+| Dijkstra | 118 | 118 | 2826 | 53 | 4.43 |
+| A* | 118 | 118 | 431 | 269 | 1.11 |
 
 ## Random obstacles 20%, cost 1-9 (same walls as above)
 
@@ -30,9 +30,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 568 | 118 | 2826 | 53 | 2.07 |
-| Dijkstra | 442 | 124 | 2826 | 74 | 4.67 |
-| A* | 442 | 124 | 2826 | 99 | 6.13 |
+| BFS | 568 | 118 | 2826 | 53 | 4.67 |
+| Dijkstra | 442 | 124 | 2826 | 74 | 4.52 |
+| A* | 442 | 124 | 2826 | 99 | 5.80 |
 
 ## Perfect maze (exactly one path)
 
@@ -40,9 +40,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 628 | 628 | 1165 | 5 | 1.58 |
-| Dijkstra | 628 | 628 | 1165 | 5 | 2.79 |
-| A* | 628 | 628 | 1048 | 6 | 1.73 |
+| BFS | 628 | 628 | 1165 | 5 | 1.77 |
+| Dijkstra | 628 | 628 | 1165 | 5 | 1.64 |
+| A* | 628 | 628 | 1048 | 6 | 4.38 |
 
 ## Maze with loops (10% extra openings)
 
@@ -50,9 +50,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 156 | 156 | 1754 | 29 | 1.35 |
-| Dijkstra | 156 | 156 | 1754 | 29 | 4.47 |
-| A* | 156 | 156 | 1199 | 43 | 2.30 |
+| BFS | 156 | 156 | 1754 | 29 | 2.31 |
+| Dijkstra | 156 | 156 | 1754 | 29 | 2.46 |
+| A* | 156 | 156 | 1199 | 43 | 2.36 |
 
 ## No path (goal sealed off)
 
@@ -60,9 +60,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | no path | - | 2824 | 53 | 3.14 |
-| Dijkstra | no path | - | 2824 | 53 | 4.36 |
-| A* | no path | - | 2824 | 1039 | 6.84 |
+| BFS | no path | - | 2824 | 53 | 2.07 |
+| Dijkstra | no path | - | 2824 | 53 | 4.22 |
+| A* | no path | - | 2824 | 1039 | 6.99 |
 
 ## U-shaped wall (A* trap)
 
@@ -70,9 +70,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 77 | 77 | 3443 | 71 | 2.55 |
-| Dijkstra | 77 | 77 | 3443 | 71 | 5.44 |
-| A* | 77 | 77 | 1037 | 102 | 3.62 |
+| BFS | 77 | 77 | 3443 | 71 | 3.27 |
+| Dijkstra | 77 | 77 | 3443 | 71 | 5.45 |
+| A* | 77 | 77 | 1037 | 102 | 2.08 |
 
 ## Terrain (cost 1-9 in patches)
 
@@ -80,9 +80,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 538 | 118 | 3600 | 60 | 4.03 |
-| Dijkstra | 375 | 118 | 3591 | 101 | 9.87 |
-| A* | 375 | 118 | 3550 | 160 | 7.71 |
+| BFS | 538 | 118 | 3600 | 60 | 2.70 |
+| Dijkstra | 375 | 118 | 3591 | 101 | 5.97 |
+| A* | 375 | 118 | 3550 | 160 | 7.51 |
 
 ## City blocks (arterial 1, local road 3, jam 9)
 
@@ -90,9 +90,9 @@ Times are a single run made while drawing, for reference only. The numbers used 
 
 | | path cost | moves | expanded | max frontier | time (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| BFS | 266 | 118 | 975 | 21 | 1.22 |
-| Dijkstra | 124 | 118 | 644 | 30 | 0.94 |
-| A* | 124 | 118 | 225 | 36 | 0.78 |
+| BFS | 266 | 118 | 975 | 21 | 0.82 |
+| Dijkstra | 124 | 118 | 644 | 30 | 0.95 |
+| A* | 124 | 118 | 225 | 36 | 0.89 |
 
 # Landmarks (main experiment)
 
@@ -105,8 +105,8 @@ Left to right: **Dijkstra | A* + Manhattan | A* + 4 landmarks**. Random start an
 | | path cost | expanded | time (ms) |
 | --- | ---: | ---: | ---: |
 | Dijkstra | 199 | 2192 | 3.62 |
-| A* + Manhattan | 199 | 1635 | 4.32 |
-| A* + 4 landmarks | 199 | 261 | 0.87 |
+| A* + Manhattan | 199 | 1635 | 5.93 |
+| A* + 4 landmarks | 199 | 261 | 1.51 |
 
 ## Landmarks: maze
 
@@ -114,9 +114,9 @@ Left to right: **Dijkstra | A* + Manhattan | A* + 4 landmarks**. Random start an
 
 | | path cost | expanded | time (ms) |
 | --- | ---: | ---: | ---: |
-| Dijkstra | 336 | 857 | 1.64 |
+| Dijkstra | 336 | 857 | 1.13 |
 | A* + Manhattan | 336 | 789 | 1.27 |
-| A* + 4 landmarks | 336 | 337 | 0.80 |
+| A* + 4 landmarks | 336 | 337 | 0.86 |
 
 ## Landmarks: city, every road cost 1, 20% of road cells jammed (cost 9)
 
@@ -125,7 +125,7 @@ Left to right: **Dijkstra | A* + Manhattan | A* + 4 landmarks**. Random start an
 | | path cost | expanded | time (ms) |
 | --- | ---: | ---: | ---: |
 | Dijkstra | 154 | 349 | 0.53 |
-| A* + Manhattan | 154 | 267 | 0.93 |
+| A* + Manhattan | 154 | 267 | 0.50 |
 | A* + 4 landmarks | 154 | 77 | 0.23 |
 
 # Real road map (Songdo, OpenStreetMap): Yonsei University -> Central Park
@@ -138,9 +138,9 @@ Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that 
 
 | | travel time (s) | points expanded | time (ms) |
 | --- | ---: | ---: | ---: |
-| Dijkstra | 446 | 1446 | 1.65 |
-| A* + straight line | 446 | 885 | 1.72 |
-| A* + 8 landmarks | 446 | 148 | 0.45 |
+| Dijkstra | 446 | 1446 | 1.73 |
+| A* + straight line | 446 | 885 | 1.74 |
+| A* + 8 landmarks | 446 | 148 | 0.47 |
 
 ## 18h (evening peak: heading out of the centre is slow)
 
@@ -148,9 +148,9 @@ Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that 
 
 | | travel time (s) | points expanded | time (ms) |
 | --- | ---: | ---: | ---: |
-| Dijkstra | 293 | 737 | 0.86 |
-| A* + straight line | 293 | 513 | 1.05 |
-| A* + 8 landmarks | 293 | 65 | 0.24 |
+| Dijkstra | 293 | 737 | 0.87 |
+| A* + straight line | 293 | 513 | 1.08 |
+| A* + 8 landmarks | 293 | 65 | 0.30 |
 
 ## 3h (night, free flow)
 
@@ -158,9 +158,9 @@ Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that 
 
 | | travel time (s) | points expanded | time (ms) |
 | --- | ---: | ---: | ---: |
-| Dijkstra | 211 | 885 | 1.70 |
-| A* + straight line | 211 | 429 | 1.64 |
-| A* + 8 landmarks | 211 | 68 | 0.25 |
+| Dijkstra | 211 | 885 | 1.03 |
+| A* + straight line | 211 | 429 | 0.92 |
+| A* + 8 landmarks | 211 | 68 | 0.26 |
 
 # 8 directions and Jump Point Search
 
@@ -174,9 +174,9 @@ In the JPS panel the magenta tint marks cells JPS only *looked at* while jumping
 
 | | path cost | expanded (JPS: jump points) | scanned while jumping | time (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| Dijkstra | 958 | 2826 | - | 6.78 |
-| A* | 958 | 1186 | - | 5.39 |
-| JPS | 958 | 640 | 4838 | 11.55 |
+| Dijkstra | 958 | 2826 | - | 10.79 |
+| A* | 958 | 1186 | - | 4.58 |
+| JPS | 958 | 640 | 4838 | 8.16 |
 
 ## 8 directions: U-shaped wall
 
@@ -184,9 +184,9 @@ In the JPS panel the magenta tint marks cells JPS only *looked at* while jumping
 
 | | path cost | expanded (JPS: jump points) | scanned while jumping | time (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| Dijkstra | 614 | 3290 | - | 9.81 |
-| A* | 614 | 924 | - | 4.71 |
-| JPS | 614 | 7 | 3831 | 6.03 |
+| Dijkstra | 614 | 3290 | - | 9.73 |
+| A* | 614 | 924 | - | 4.55 |
+| JPS | 614 | 7 | 3831 | 3.99 |
 
 ## 8 directions: city blocks, every road cost 1
 
@@ -194,9 +194,9 @@ In the JPS panel the magenta tint marks cells JPS only *looked at* while jumping
 
 | | path cost | expanded (JPS: jump points) | scanned while jumping | time (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| Dijkstra | 1180 | 975 | - | 1.56 |
-| A* | 1180 | 766 | - | 1.75 |
-| JPS | 1180 | 68 | 1003 | 1.73 |
+| Dijkstra | 1180 | 975 | - | 3.11 |
+| A* | 1180 | 766 | - | 1.71 |
+| JPS | 1180 | 68 | 1003 | 1.13 |
 
 ## 8 directions: maze with loops
 
@@ -204,6 +204,6 @@ In the JPS panel the magenta tint marks cells JPS only *looked at* while jumping
 
 | | path cost | expanded (JPS: jump points) | scanned while jumping | time (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| Dijkstra | 1560 | 1754 | - | 2.85 |
-| A* | 1560 | 1408 | - | 4.06 |
-| JPS | 1560 | 436 | 1694 | 4.49 |
+| Dijkstra | 1560 | 1754 | - | 5.04 |
+| A* | 1560 | 1408 | - | 4.55 |
+| JPS | 1560 | 436 | 1694 | 2.76 |
