@@ -256,6 +256,22 @@ def build(results_dir):
                          for h in dict.fromkeys((night, eve)))
         lines.append(f"- Landmarks measured at 8h: {used}. Landmarks measured at night: "
                      + ("optimal at every hour." if night_wrong == 0 else f"up to {night_wrong:.0f}% wrong."))
+    rb_rows = load(results_dir, "RB")
+    if rb_rows:
+        from analyze import rb_tables, rb_wrong
+        tabs = rb_tables(rb_rows)
+        exact, off = tabs.get(0.0), tabs[max(tabs)]
+        peak = 8 if 8 in off else max(off)
+        lines += ["", "## Landmarks per time band (real road map)", ""]
+        if exact:
+            e = exact[peak]
+            lines.append(f"- {peak}h, traffic = model: landmarks measured now {e['alt_now']['time']:.2f} ms, "
+                         f"time band {e['alt_band']['time']:.2f} ms, night {e['alt_night']['time']:.2f} ms, "
+                         f"Dijkstra {e['dijkstra']['time']:.2f} ms.")
+        w = rb_wrong(off)
+        lines.append(f"- Traffic up to {max(tabs):.0%} off the model, longer routes over all hours: measured now "
+                     f"{w['alt_now'][0]:.1f}%, night {w['alt_night'][0]:.1f}%, time band {w['alt_band'][0]:.1f}%, "
+                     f"time band with margin {w['alt_band_safe'][0]:.1f}%.")
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)
@@ -263,7 +279,8 @@ def build(results_dir):
             by[x["algorithm"]].append(x["time_ms"])
         spread = ", ".join(f"{NAMES[a]} {(quartiles(by[a])[2] - quartiles(by[a])[0]) / statistics.median(by[a]):.1%}"
                            for a in MAIN if a in by)
-        lines.append(f"- Measurement noise (IQR / median, same map 30 runs): {spread}.")
+        lines += ["", "## Measurement noise", ""]
+        lines.append(f"- IQR / median, same map 30 runs: {spread}.")
     return "\n".join(lines) + "\n"
 
 

@@ -873,6 +873,88 @@ def chart_rm(table, out, network=None, prefix="RM"):
         ylim=(0, 105), width=820))
 
 
+# ---------------------------------------------------------------------------
+# landmarks per time band (RB)
+# ---------------------------------------------------------------------------
+
+RB_ALGS = ["dijkstra", "alt_now", "alt_night", "alt_band", "alt_band_safe"]
+RB_NAMES = {"dijkstra": "Dijkstra", "alt_now": "landmarks measured this hour",
+            "alt_night": "landmarks measured at night", "alt_band": "landmarks of the time band",
+            "alt_band_safe": "time band with 10% margin"}
+RB_SHORT = {"dijkstra": "Dijkstra", "alt_now": "measured now", "alt_night": "measured at night",
+            "alt_band": "time band", "alt_band_safe": "time band + 10% margin"}
+RB_SETS = {"dijkstra": "-", "alt_now": "24", "alt_night": "1", "alt_band": "4", "alt_band_safe": "4"}
+RB_SAFE = {"dijkstra": "always", "alt_now": "if traffic = model", "alt_night": "if traffic = model",
+           "alt_band": "if traffic = model", "alt_band_safe": "if traffic within 10% of model"}
+
+
+def _rb_style(alg):
+    return {"dijkstra": (ALGO_COLORS["dijkstra"], False), "alt_now": (ALGO_COLORS["alt"], False),
+            "alt_night": (tint(ALGO_COLORS["alt"], 0.5), True), "alt_band": (ALGO_COLORS["jps"], False),
+            "alt_band_safe": (ALGO_COLORS["jps"], True)}[alg]
+
+
+def rb_tables(rows):
+    """error -> rm_table of the rows with that much traffic error (0.0 = traffic follows the model)."""
+    split = defaultdict(list)
+    for r in rows:
+        split[r["params"].get("error", 0.0)].append(r)
+    return {e: rm_table(rs) for e, rs in sorted(split.items())}
+
+
+def rb_wrong(table):
+    """algorithm -> (% of all queries over all hours answered with a longer route, worst extra %)."""
+    out = {}
+    for alg in RB_ALGS:
+        n = sum(table[h][alg]["queries"] for h in table)
+        wrong = sum(table[h][alg]["wrong"] * table[h][alg]["queries"] / 100 for h in table)
+        out[alg] = (wrong / n * 100, max(table[h][alg]["worst"] for h in table))
+    return out
+
+
+def chart_rb(tables, out):
+    for e, table in tables.items():
+        hours = sorted(table)
+        traffic = "traffic as the model says" if e == 0 else f"real traffic up to {e:.0%} off the model"
+        p = LinePlot(f"Landmarks per time band, {traffic}", "hour of the day", "search time (ms, median)",
+                     subtitle="Songdo, 8 landmarks. Bands 7-9h, 10-16h, 17-20h, 21-6h. "
+                              "Medians of 30 start/goal pairs.",
+                     xticks=hours, xlim=(min(hours), max(hours)), width=900)
+        for alg in RB_ALGS:
+            color, dashed = _rb_style(alg)
+            p.line(hours, [table[h][alg]["time"] for h in hours], color, RB_SHORT[alg], dashed=dashed)
+        (out / ("RB_time.svg" if e == 0 else "RB_time_off.svg")).write_text(p.render())
+    algs = RB_ALGS[1:]
+    series = []
+    for e, shade in zip(sorted(tables), (0.55, 0.0)):
+        w = rb_wrong(tables[e])
+        label = "traffic = model" if e == 0 else f"traffic up to {e:.0%} off the model"
+        series.append(dict(label=label, color=tint(ALGO_COLORS["alt"], shade), values=[w[a][0] for a in algs]))
+    (out / "RB_wrong.svg").write_text(bar_chart(
+        "When real traffic is not the model: wrong answers", [RB_SHORT[a] for a in algs], series,
+        "queries answered with a longer route (%)", value_labels=True, value_fmt=lambda v: f"{v:.1f}",
+        subtitle="All 12 hours x 30 start/goal pairs. Landmarks are always measured on the model.", width=760))
+
+
+def rb_section_table(tables):
+    exact, off = tables.get(0.0), tables[max(tables)]
+    peak = 8 if 8 in off else max(off)
+    we, wo = (rb_wrong(exact) if exact else {}), rb_wrong(off)
+    rows = []
+    for alg in RB_ALGS:
+        g = off[peak][alg]
+        prep = f"{g['prep']:.0f}" if alg.startswith("alt") else "-"
+        rows.append([RB_NAMES[alg], RB_SAFE[alg], RB_SETS[alg],
+                     f"{exact[peak][alg]['time']:.2f}" if exact else "-", f"{g['time']:.2f}", f"{g['cells']:,.0f}",
+                     "-" if alg == "dijkstra" else f"{g['accuracy']:.0%}",
+                     f"{we[alg][0]:.1f}%" if exact else "-", f"{wo[alg][0]:.1f}%",
+                     f"+{wo[alg][1]:.1f}%" if wo[alg][1] > 0 else "0", prep])
+    return md_table(["method", "exact", "landmark sets a day", f"{peak}h ms (traffic = model)",
+                     f"{peak}h ms (traffic off)", f"{peak}h points (traffic off)", f"{peak}h accuracy (traffic off)",
+                     "longer routes (traffic = model)", "longer routes (traffic off)", "worst extra (traffic off)",
+                     "precompute ms"], rows, ["---", "---"] + ["---:"] * 9)
+
+
 def chart_rm_model(network, out):
     """The traffic model itself: mean travel time vs free flow, by road group and hour."""
     hours = list(range(24))
@@ -1122,7 +1204,7 @@ def analyze(results_dir, out_dir, log=print):
     charts.mkdir(parents=True, exist_ok=True)
     data = {exp: load(results_dir, exp)
             for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "RM", "RY",
-                        "noise")}
+                        "RB", "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -1308,6 +1390,18 @@ def analyze(results_dir, out_dir, log=print):
                 "The straight-line heuristic divides the great-circle distance by the fastest free-flow speed. "
                 "Landmarks (8) are measured once per hour and reused by all queries of that hour. "
                 "Night landmarks are checked to be optimal in every run.")
+
+    if data["RB"]:
+        tables = rb_tables(data["RB"])
+        chart_rb(tables, charts)
+        section("RB. Landmarks per time band (real road map)", ["RB_time.svg", "RB_time_off.svg", "RB_wrong.svg"],
+                rb_section_table(tables),
+                "Bands: morning 7-9h, day 10-16h, evening 17-20h, night 21-6h. Time-band landmarks are measured "
+                "once per band on the cheapest hour of every segment over the band, so no hour of the band is "
+                "cheaper (exact while traffic follows the model). The 10% margin multiplies those costs by 0.9, "
+                "so a day up to 10% lighter than the model is not cheaper either. 'Traffic off': every query "
+                "searches one day's traffic, each segment up to +-10% off the model (seeded); landmarks are "
+                "always measured on the model.")
 
     if data["RY"]:
         table = rm_table(data["RY"])

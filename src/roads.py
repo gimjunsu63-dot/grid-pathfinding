@@ -42,6 +42,19 @@ travel time = free-flow time x (1 + SLOWDOWN[group] x rush(hour) x bottleneck[ed
 Every factor is >= 0, so no hour is faster than free flow at night. Landmarks
 measured at night are therefore lower bounds at every hour (see landmarks.py
 for why rising costs keep old landmarks safe).
+
+Time bands (experiment RB)
+--------------------------
+The same argument works for any set of hours: take, for every segment, its
+cheapest travel time over the hours of a band (morning 7-9h, day 10-16h,
+evening 17-20h, night and shoulders 21-6h). No hour of the band is cheaper, so landmarks
+measured on these costs never overestimate at any hour of the band, and they
+are much closer to rush-hour traffic than night landmarks are.
+
+Real traffic is not the forecast. actual_costs() moves every segment by up to
++-FORECAST_ERROR around the model (seeded per day). Band costs times
+(1 - FORECAST_ERROR) are still below every such day, so landmarks measured on
+them stay exact; landmarks measured on the forecast itself can overestimate.
 """
 
 import heapq
@@ -77,6 +90,11 @@ RUSH = 8                                      # the morning peak
 
 # small area around Songdo Central Park for quick runs and tests
 QUICK_BBOX = (37.384, 126.628, 37.400, 126.648)
+# hours with similar traffic go together: a light hour in a band would pull its cheapest costs
+# down to free flow (a first try with 6-9h for the morning gave landmarks no better than night ones)
+BANDS = {"morning": (7, 8, 9), "day": (10, 11, 12, 13, 14, 15, 16), "evening": (17, 18, 19, 20),
+         "night": (21, 22, 23, 0, 1, 2, 3, 4, 5, 6)}
+FORECAST_ERROR = 0.1                          # real traffic within +-10% of the model
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -110,6 +128,11 @@ def rush(hour):
         return 0.0
     midday = 0.35 if 10 <= hour <= 16 else 0.0
     return max(_morning(hour), _evening(hour), midday)
+
+
+def band_of(hour):
+    """Name of the time band that holds this hour."""
+    return next(name for name, hours in BANDS.items() if hour in hours)
 
 
 def tide(hour):
@@ -175,6 +198,27 @@ class RoadNetwork:
         if hour not in self._graphs:
             self._graphs[hour] = RoadGraph(self, hour, self.costs_at(hour))
         return self._graphs[hour]
+
+    def graph_from(self, costs, hour=None):
+        """A searchable graph with these segment costs (band costs, one day's traffic)."""
+        return RoadGraph(self, hour, costs)
+
+    def band_costs(self, band, margin=0.0):
+        """Cheapest cost of every segment over the hours of a band, times (1 - margin), at least 1.
+
+        No hour of the band is cheaper, and with margin = e no day whose traffic is at most
+        e lighter than the model is cheaper either: landmarks measured on these costs are
+        lower bounds there.
+        """
+        costs = [min(c) for c in zip(*(self.costs_at(h) for h in BANDS[band]))]
+        if margin:
+            costs = [max(1, math.floor(c * (1 - margin))) for c in costs]
+        return costs
+
+    def actual_costs(self, hour, error, seed):
+        """One day's traffic at this hour: every segment off the model by up to +-error (seeded)."""
+        rng = random.Random(f"{self.seed}:day:{seed}:{hour}")
+        return [max(1, math.ceil(c * rng.uniform(1 - error, 1 + error))) for c in self.costs_at(hour)]
 
 
 def _largest_scc(n, edges):

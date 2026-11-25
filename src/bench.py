@@ -20,6 +20,8 @@ Experiments (see EXPERIMENTS below):
     RM          real road map (Songdo, OpenStreetMap) at different hours of the day:
                 Dijkstra, A* + straight line, landmarks measured now / at night / at 8h
     RY          the same, but every trip starts at Yonsei University International Campus
+    RB          landmarks per time band (cheapest hour of each band) vs measured now / at night,
+                with the forecast right and with real traffic +-10% off the forecast
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -91,6 +93,7 @@ class Spec:
     rule       check() rule: "exact" = optimal cost, "any" = a path no cheaper than optimal
                (BFS), float w = at most w x optimal (weighted A*),
                "exact_if_costs_rise" = optimal unless some jams cleared (old landmarks)
+               "exact_if_forecast_right" = optimal unless real traffic differs from the model
     needs      "uniform": only run where every open cell costs 1 (JPS)
     prepare    prepare(grid, start, goal) -> state, run once per map; its time is prep_ms
     heuristic  heuristic(grid, goal_index, state) -> h(v, t), used for h_accuracy
@@ -242,6 +245,38 @@ ROADS = {
                      heuristic=_h_state),
 }
 
+def prepare_band_landmarks(grid, start, goal, margin=0.0):
+    """Landmarks measured on the cheapest hour of the time band of the graph's hour.
+
+    One measurement per band (four a day); with margin = e they stay exact even
+    when real traffic is up to e lighter than the model.
+    """
+    band = roads.band_of(grid.hour)
+    key = (id(grid.network), "band", band, margin)
+    if key not in _ROAD_STATES:
+        t0 = time.perf_counter_ns()
+        net = grid.network
+        state = roads.road_landmarks(net.graph_from(net.band_costs(band, margin)), ROAD_LANDMARKS)
+        state.prep_ms = (time.perf_counter_ns() - t0) / 1e6
+        _ROAD_STATES[key] = state
+    return _ROAD_STATES[key]
+
+
+BANDED = {
+    "dijkstra": Spec(dijkstra, heuristic=_h_zero),
+    # measured on the model of this hour: exact only if traffic is what the model says
+    "alt_now": Spec(search_with, "exact_if_forecast_right", prepare=prepare_road_landmarks,
+                    heuristic=_h_state),
+    "alt_night": Spec(search_with, "exact_if_forecast_right",
+                      prepare=partial(prepare_road_landmarks, hour=roads.NIGHT), heuristic=_h_state),
+    # cheapest hour of the band: exact at every hour of the band if the model is right
+    "alt_band": Spec(search_with, "exact_if_forecast_right", prepare=prepare_band_landmarks,
+                     heuristic=_h_state),
+    # band costs x (1 - 10%): exact even when real traffic is up to 10% lighter than the model
+    "alt_band_safe": Spec(search_with, prepare=partial(prepare_band_landmarks, margin=roads.FORECAST_ERROR),
+                          heuristic=_h_state),
+}
+
 # Baseline condition: change one thing at a time away from this.
 BASE = dict(kind="random", size=200, wall_ratio=0.2, weighted=False, endpoints="fixed")
 
@@ -275,12 +310,16 @@ def dyn(appear=0.0, clear=0.0):
     return dict(jam(0.2), endpoints="random", jam_up=appear, jam_down=clear)
 
 
-def road(hour, start="random"):
+def road(hour, start="random", error=0.0):
     """Songdo road network at this hour of the day (time-of-day traffic model in roads.py).
 
     start="yonsei": every trip starts at Yonsei University International Campus.
+    error=e: the searched graph is one day's real traffic, each segment up to +-e off the model.
     """
-    return dict(kind="road", size=0, endpoints=start, hour=hour)
+    c = dict(kind="road", size=0, endpoints=start, hour=hour)
+    if error:
+        c["error"] = error
+    return c
 
 
 # name -> (title, algorithm set, conditions)
@@ -366,11 +405,13 @@ EXPERIMENTS = {
     "RM": ("real road map (Songdo, OpenStreetMap) by hour of day", ROADS, [road(h) for h in ROAD_HOURS]),
     "RY": ("real road map, every trip from Yonsei University International Campus", ROADS,
            [road(h, start="yonsei") for h in ROAD_HOURS]),
+    "RB": ("real road map, landmarks per time band, forecast right / +-10% off", BANDED,
+           [road(h, error=e) for e in (0.0, roads.FORECAST_ERROR) for h in ROAD_HOURS]),
 }
 # DY answers each query once per map, so it uses more maps to count wrong answers.
 # RM: one map, so "maps" are start/goal pairs (30 per hour, the same pairs at every hour).
 # RY: same, with the start fixed at Yonsei (30 goals).
-MAP_FACTOR = {"DY": 3, "RM": 3, "RY": 3}
+MAP_FACTOR = {"DY": 3, "RM": 3, "RY": 3, "RB": 3}
 
 FIELDS = [
     "experiment", "condition", "kind", "size", "params", "endpoints",
@@ -441,7 +482,8 @@ def condition_label(c):
     if c["kind"] == "road":
         where = "songdo-center" if c.get("quick") else "songdo"
         frm = "-from-yonsei" if c.get("endpoints") == "yonsei" else ""
-        return f"road-{where}{frm}-{c['hour']:02d}h"
+        err = f"-traffic{round(c['error'] * 100)}pct-off" if c.get("error") else ""
+        return f"road-{where}{frm}-{c['hour']:02d}h{err}"
     parts = [c["kind"], str(c["size"])]
     if c.get("moves") == 8:
         parts.append("8dir")
@@ -464,6 +506,9 @@ def build_road(c, seed):
     fixed = roads.nearest_node(graph, roads.YONSEI) if c.get("endpoints") == "yonsei" else None
     start, goal = roads.random_query(graph, seed, start=fixed)
     params = dict(hour=c["hour"], network=net.name)
+    if c.get("error"):                      # search one day's real traffic, not the model
+        graph = net.graph_from(net.actual_costs(c["hour"], c["error"], seed), hour=c["hour"])
+        params["error"] = c["error"]
     return MapCase("road", graph, start, goal, seed, 1, dict(params)), params
 
 
@@ -495,6 +540,8 @@ def check(name, result, optimal, case, rule="exact"):
         raise AssertionError(f"{where}: missed an existing path")
     if rule == "exact_if_costs_rise":       # theory: old landmarks stay safe while costs only rise
         rule = "any" if case.params.get("jam_down") else "exact"
+    if rule == "exact_if_forecast_right":   # landmarks from the model: safe only if traffic follows it
+        rule = "any" if case.params.get("error") else "exact"
     if result.cost < optimal:
         raise AssertionError(f"{where}: cost {result.cost} below optimal {optimal}")
     if rule == "exact" and result.cost != optimal:
@@ -623,6 +670,8 @@ def warm_up():
               (TRAFFIC, case), (MOVES8, case8), (HQ, case), (PLACED, case), (DYNAMIC, case_dy)]
     if roads.data_available():
         tables.append((ROADS, build_map(dict(road(roads.RUSH), quick=True), BASE_SEED)[0]))
+        tables.append((BANDED, build_map(dict(road(roads.RUSH, error=roads.FORECAST_ERROR), quick=True),
+                                         BASE_SEED)[0]))
     for algos, c in tables:
         calls, _, _, _ = prepare_all({n: as_spec(v) for n, v in algos.items()}, c)
         for fn in calls.values():
@@ -657,7 +706,7 @@ def run(experiments, out_dir, n_maps, repeats, quick=False, log=print):
                 n = 5 if quick else NOISE_REPEATS
                 rows = run_noise(n, writer, size=30 if quick else 200, log=log)
                 settings = dict(repeats=n, algorithms=list(MAIN))
-            elif exp in ("RM", "RY") and not roads.data_available():
+            elif exp in ("RM", "RY", "RB") and not roads.data_available():
                 log(f"[{exp}] skipped: data/songdo_roads.json not found (run python3 tools/fetch_osm.py)")
                 rows, settings = 0, dict(skipped="no road data")
             else:

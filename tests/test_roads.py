@@ -129,6 +129,61 @@ class TestNetwork(unittest.TestCase):
                 self.assertEqual(astar(g, s, t, heuristic=h).cost, best)
 
 
+class TestTimeBands(unittest.TestCase):
+    """Landmarks measured on the cheapest hour of a band are safe at every hour of the band."""
+
+    def setUp(self):
+        self.net = roads.network_from_osm(street_grid())
+
+    def test_bands_cover_every_hour_once(self):
+        hours = [h for hs in roads.BANDS.values() for h in hs]
+        self.assertEqual(sorted(hours), list(range(24)))
+        self.assertEqual(roads.band_of(8), "morning")
+        self.assertEqual(roads.band_of(3), "night")
+
+    def test_band_costs_are_below_every_hour_and_every_day(self):
+        for band, hours in roads.BANDS.items():
+            low = self.net.band_costs(band)
+            safe = self.net.band_costs(band, margin=roads.FORECAST_ERROR)
+            for h in hours:
+                cost = self.net.costs_at(h)
+                self.assertTrue(all(a <= b for a, b in zip(low, cost)))
+                for day in range(3):
+                    real = self.net.actual_costs(h, roads.FORECAST_ERROR, day)
+                    self.assertTrue(all(a <= b for a, b in zip(safe, real)))
+
+    def test_one_day_of_traffic(self):
+        model = self.net.costs_at(8)
+        day = self.net.actual_costs(8, 0.1, 5)
+        self.assertEqual(day, self.net.actual_costs(8, 0.1, 5))
+        self.assertNotEqual(day, self.net.actual_costs(8, 0.1, 6))
+        self.assertTrue(all(0.9 * m - 1 <= d <= 1.1 * m + 1 for m, d in zip(model, day)))
+
+    def test_band_landmarks_safe_and_consistent_in_the_band(self):
+        g_band = self.net.graph_from(self.net.band_costs("morning"))
+        h = roads.road_landmarks(g_band, 4)
+        for hour in roads.BANDS["morning"]:
+            g = self.net.graph_at(hour)
+            for seed in range(3):
+                s, t = roads.random_query(g, seed, min_m=300)
+                rem = g.remaining_to(t)
+                for v in range(g.n):
+                    self.assertLessEqual(h(v, t), rem[v])
+                    for u, c in g.neighbors(v):
+                        self.assertLessEqual(h(v, t), c + h(u, t))
+                self.assertEqual(astar(g, s, t, heuristic=h).cost, dijkstra(g, s, t).cost)
+
+    def test_margin_landmarks_safe_on_real_days(self):
+        g_safe = self.net.graph_from(self.net.band_costs("evening", margin=roads.FORECAST_ERROR))
+        h = roads.road_landmarks(g_safe, 4)
+        for day in range(4):
+            g = self.net.graph_from(self.net.actual_costs(18, roads.FORECAST_ERROR, day), hour=18)
+            s, t = roads.random_query(g, day, min_m=300)
+            rem = g.remaining_to(t)
+            self.assertTrue(all(h(v, t) <= rem[v] for v in range(g.n)))
+            self.assertEqual(astar(g, s, t, heuristic=h).cost, dijkstra(g, s, t).cost)
+
+
 class TestFixedStart(unittest.TestCase):
     def setUp(self):
         self.g = roads.network_from_osm(street_grid()).graph_at(roads.RUSH)
