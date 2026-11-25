@@ -497,11 +497,50 @@ farthest: each landmark is the cell farthest (by path cost) from those already c
 | city, jams 20% | 8 | corners | 91% | 506 | 1.65 | 6.5x |
 | city, jams 20% | 8 | random | 87% | 606 | 1.88 | 5.3x |
 
+## RM0. How much the Songdo map changes over the day (traffic model)
+
+Same start/goal pairs as RM, fastest route at each hour compared with the night (free flow).
+
+| hour | average segment vs night | typical trip vs night | slowest trip vs night | fastest route changed | keep night route: typical / worst extra |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+| 1h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+| 2h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+| 3h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+| 4h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+| 5h | x1.01 | x1.02 | x1.03 | 0% | +0.0% / +0.0% |
+| 6h | x1.11 | x1.14 | x1.23 | 20% | +0.0% / +2.5% |
+| 7h | x1.37 | x1.48 | x1.80 | 60% | +0.3% / +5.8% |
+| 8h | x1.55 | x1.70 | x2.17 | 63% | +1.0% / +7.8% |
+| 9h | x1.37 | x1.47 | x1.79 | 53% | +0.2% / +5.6% |
+| 10h | x1.19 | x1.26 | x1.41 | 37% | +0.0% / +4.4% |
+| 11h | x1.19 | x1.26 | x1.41 | 40% | +0.0% / +5.0% |
+| 12h | x1.19 | x1.26 | x1.42 | 40% | +0.0% / +4.2% |
+| 13h | x1.19 | x1.26 | x1.42 | 33% | +0.0% / +4.1% |
+| 14h | x1.19 | x1.27 | x1.41 | 40% | +0.0% / +5.0% |
+| 15h | x1.19 | x1.27 | x1.41 | 33% | +0.0% / +4.9% |
+| 16h | x1.19 | x1.27 | x1.41 | 37% | +0.0% / +5.0% |
+| 17h | x1.31 | x1.43 | x1.68 | 53% | +0.2% / +6.9% |
+| 18h | x1.52 | x1.72 | x2.22 | 67% | +1.5% / +12.8% |
+| 19h | x1.52 | x1.72 | x2.23 | 70% | +1.3% / +11.4% |
+| 20h | x1.31 | x1.43 | x1.67 | 50% | +0.0% / +8.2% |
+| 21h | x1.11 | x1.16 | x1.24 | 23% | +0.0% / +2.6% |
+| 22h | x1.02 | x1.03 | x1.06 | 3% | +0.0% / +0.2% |
+| 23h | x1.00 | x1.00 | x1.00 | 0% | +0.0% / +0.0% |
+
 ## RM. Real road map (Songdo, OpenStreetMap) over the day
 
 Map data (c) OpenStreetMap contributors, ODbL 1.0 (data/songdo_roads.json). Edge cost = travel time in tenths of a second at that hour. The traffic is a model (src/roads.py), not measured traffic. The straight-line heuristic divides the great-circle distance by the fastest free-flow speed. Landmarks (8) are measured once per hour and reused by all queries of that hour. Night landmarks are checked to be optimal in every run.
 
 ![RM_model.svg](charts/RM_model.svg)
+
+![RM_map.svg](charts/RM_map.svg)
+
+![RM_map_direction.svg](charts/RM_map_direction.svg)
+
+![RM_change.svg](charts/RM_change.svg)
+
+![RM_route.svg](charts/RM_route.svg)
 
 ![RM_time.svg](charts/RM_time.svg)
 
@@ -511,66 +550,141 @@ Map data (c) OpenStreetMap contributors, ODbL 1.0 (data/songdo_roads.json). Edge
 
 | hour | method | time ms | points expanded | accuracy | points overestimated | queries with a longer route | worst extra time | landmark precompute ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 3h | Dijkstra | 2.75 | 2,296 | - | 0% | 0% | 0 | - |
-| 3h | A* + straight line | 2.55 | 1,208 | 34% | 0% | 0% | 0 | - |
-| 3h | landmarks measured this hour | 0.38 | 101 | 90% | 0% | 0% | 0 | 47 |
-| 3h | landmarks measured at night (3h) | 0.36 | 101 | 90% | 0% | 0% | 0 | 47 |
-| 3h | landmarks measured at 8h | 0.33 | 96 | 152% | 97% | 73% | +18.9% | 59 |
-| 6h | Dijkstra | 2.73 | 2,304 | - | 0% | 0% | 0 | - |
-| 6h | A* + straight line | 2.70 | 1,322 | 30% | 0% | 0% | 0 | - |
-| 6h | landmarks measured this hour | 0.45 | 129 | 85% | 0% | 0% | 0 | 51 |
-| 6h | landmarks measured at night (3h) | 0.96 | 292 | 78% | 0% | 0% | 0 | 47 |
-| 6h | landmarks measured at 8h | 0.36 | 97 | 131% | 94% | 63% | +13.0% | 59 |
-| 7h | Dijkstra | 2.86 | 2,292 | - | 0% | 0% | 0 | - |
-| 7h | A* + straight line | 3.22 | 1,542 | 22% | 0% | 0% | 0 | - |
-| 7h | landmarks measured this hour | 0.45 | 124 | 86% | 0% | 0% | 0 | 45 |
-| 7h | landmarks measured at night (3h) | 2.62 | 806 | 60% | 0% | 0% | 0 | 47 |
-| 7h | landmarks measured at 8h | 0.43 | 108 | 101% | 59% | 33% | +3.1% | 59 |
-| 8h | Dijkstra | 2.75 | 2,255 | - | 0% | 0% | 0 | - |
-| 8h | A* + straight line | 3.43 | 1,642 | 19% | 0% | 0% | 0 | - |
-| 8h | landmarks measured this hour | 0.49 | 122 | 87% | 0% | 0% | 0 | 59 |
-| 8h | landmarks measured at night (3h) | 2.95 | 922 | 52% | 0% | 0% | 0 | 47 |
-| 8h | landmarks measured at 8h | 0.49 | 122 | 87% | 0% | 0% | 0 | 59 |
-| 9h | Dijkstra | 2.79 | 2,281 | - | 0% | 0% | 0 | - |
-| 9h | A* + straight line | 3.21 | 1,538 | 22% | 0% | 0% | 0 | - |
-| 9h | landmarks measured this hour | 0.50 | 122 | 86% | 0% | 0% | 0 | 59 |
-| 9h | landmarks measured at night (3h) | 2.63 | 805 | 60% | 0% | 0% | 0 | 47 |
-| 9h | landmarks measured at 8h | 0.52 | 116 | 101% | 60% | 43% | +4.8% | 59 |
-| 10h | Dijkstra | 2.81 | 2,332 | - | 0% | 0% | 0 | - |
-| 10h | A* + straight line | 3.08 | 1,384 | 27% | 0% | 0% | 0 | - |
-| 10h | landmarks measured this hour | 0.58 | 129 | 86% | 0% | 0% | 0 | 46 |
-| 10h | landmarks measured at night (3h) | 1.77 | 479 | 71% | 0% | 0% | 0 | 47 |
-| 10h | landmarks measured at 8h | 0.50 | 103 | 119% | 87% | 63% | +10.4% | 59 |
-| 12h | Dijkstra | 2.89 | 2,331 | - | 0% | 0% | 0 | - |
-| 12h | A* + straight line | 3.13 | 1,380 | 27% | 0% | 0% | 0 | - |
-| 12h | landmarks measured this hour | 0.63 | 130 | 85% | 0% | 0% | 0 | 51 |
-| 12h | landmarks measured at night (3h) | 2.07 | 486 | 71% | 0% | 0% | 0 | 47 |
-| 12h | landmarks measured at 8h | 0.60 | 112 | 119% | 87% | 60% | +9.5% | 59 |
-| 15h | Dijkstra | 2.85 | 2,344 | - | 0% | 0% | 0 | - |
-| 15h | A* + straight line | 3.05 | 1,380 | 27% | 0% | 0% | 0 | - |
-| 15h | landmarks measured this hour | 0.66 | 135 | 85% | 0% | 0% | 0 | 47 |
-| 15h | landmarks measured at night (3h) | 2.21 | 486 | 71% | 0% | 0% | 0 | 47 |
-| 15h | landmarks measured at 8h | 0.60 | 99 | 119% | 87% | 53% | +10.8% | 59 |
-| 17h | Dijkstra | 2.81 | 2,299 | - | 0% | 0% | 0 | - |
-| 17h | A* + straight line | 3.49 | 1,520 | 24% | 0% | 0% | 0 | - |
-| 17h | landmarks measured this hour | 0.58 | 117 | 85% | 0% | 0% | 0 | 47 |
-| 17h | landmarks measured at night (3h) | 2.88 | 710 | 63% | 0% | 0% | 0 | 47 |
-| 17h | landmarks measured at 8h | 0.65 | 120 | 106% | 73% | 63% | +6.1% | 59 |
-| 18h | Dijkstra | 2.85 | 2,264 | - | 0% | 0% | 0 | - |
-| 18h | A* + straight line | 3.65 | 1,638 | 20% | 0% | 0% | 0 | - |
-| 18h | landmarks measured this hour | 0.65 | 122 | 86% | 0% | 0% | 0 | 49 |
-| 18h | landmarks measured at night (3h) | 3.58 | 919 | 53% | 0% | 0% | 0 | 47 |
-| 18h | landmarks measured at 8h | 0.70 | 132 | 88% | 22% | 17% | +0.9% | 59 |
-| 19h | Dijkstra | 2.88 | 2,265 | - | 0% | 0% | 0 | - |
-| 19h | A* + straight line | 3.78 | 1,644 | 20% | 0% | 0% | 0 | - |
-| 19h | landmarks measured this hour | 0.71 | 128 | 87% | 0% | 0% | 0 | 48 |
-| 19h | landmarks measured at night (3h) | 3.73 | 926 | 53% | 0% | 0% | 0 | 47 |
-| 19h | landmarks measured at 8h | 0.80 | 145 | 89% | 23% | 7% | +0.5% | 59 |
-| 21h | Dijkstra | 3.08 | 2,314 | - | 0% | 0% | 0 | - |
-| 21h | A* + straight line | 3.14 | 1,325 | 29% | 0% | 0% | 0 | - |
-| 21h | landmarks measured this hour | 0.79 | 131 | 85% | 0% | 0% | 0 | 56 |
-| 21h | landmarks measured at night (3h) | 1.56 | 304 | 78% | 0% | 0% | 0 | 47 |
-| 21h | landmarks measured at 8h | 0.59 | 96 | 130% | 94% | 50% | +12.3% | 59 |
+| 3h | Dijkstra | 3.26 | 2,296 | - | 0% | 0% | 0 | - |
+| 3h | A* + straight line | 2.90 | 1,208 | 34% | 0% | 0% | 0 | - |
+| 3h | landmarks measured this hour | 0.42 | 101 | 90% | 0% | 0% | 0 | 125 |
+| 3h | landmarks measured at night (3h) | 0.39 | 101 | 90% | 0% | 0% | 0 | 125 |
+| 3h | landmarks measured at 8h | 0.43 | 109 | 152% | 96% | 70% | +18.9% | 107 |
+| 6h | Dijkstra | 2.63 | 2,298 | - | 0% | 0% | 0 | - |
+| 6h | A* + straight line | 2.68 | 1,312 | 30% | 0% | 0% | 0 | - |
+| 6h | landmarks measured this hour | 0.40 | 102 | 89% | 0% | 0% | 0 | 46 |
+| 6h | landmarks measured at night (3h) | 0.92 | 290 | 79% | 0% | 0% | 0 | 125 |
+| 6h | landmarks measured at 8h | 0.38 | 102 | 133% | 92% | 50% | +15.2% | 107 |
+| 7h | Dijkstra | 2.65 | 2,244 | - | 0% | 0% | 0 | - |
+| 7h | A* + straight line | 2.93 | 1,417 | 22% | 0% | 0% | 0 | - |
+| 7h | landmarks measured this hour | 0.45 | 124 | 89% | 0% | 0% | 0 | 45 |
+| 7h | landmarks measured at night (3h) | 2.21 | 704 | 62% | 0% | 0% | 0 | 125 |
+| 7h | landmarks measured at 8h | 0.44 | 108 | 102% | 61% | 37% | +4.3% | 107 |
+| 8h | Dijkstra | 2.57 | 2,196 | - | 0% | 0% | 0 | - |
+| 8h | A* + straight line | 3.09 | 1,487 | 20% | 0% | 0% | 0 | - |
+| 8h | landmarks measured this hour | 0.51 | 118 | 86% | 0% | 0% | 0 | 107 |
+| 8h | landmarks measured at night (3h) | 2.49 | 780 | 54% | 0% | 0% | 0 | 125 |
+| 8h | landmarks measured at 8h | 0.48 | 118 | 86% | 0% | 0% | 0 | 107 |
+| 9h | Dijkstra | 2.69 | 2,238 | - | 0% | 0% | 0 | - |
+| 9h | A* + straight line | 3.02 | 1,412 | 22% | 0% | 0% | 0 | - |
+| 9h | landmarks measured this hour | 0.51 | 110 | 89% | 0% | 0% | 0 | 49 |
+| 9h | landmarks measured at night (3h) | 2.29 | 710 | 62% | 0% | 0% | 0 | 125 |
+| 9h | landmarks measured at 8h | 0.48 | 109 | 102% | 61% | 17% | +4.2% | 107 |
+| 10h | Dijkstra | 2.75 | 2,320 | - | 0% | 0% | 0 | - |
+| 10h | A* + straight line | 2.96 | 1,362 | 27% | 0% | 0% | 0 | - |
+| 10h | landmarks measured this hour | 0.60 | 129 | 86% | 0% | 0% | 0 | 48 |
+| 10h | landmarks measured at night (3h) | 1.73 | 452 | 72% | 0% | 0% | 0 | 125 |
+| 10h | landmarks measured at 8h | 0.52 | 101 | 121% | 85% | 63% | +15.7% | 107 |
+| 12h | Dijkstra | 2.90 | 2,331 | - | 0% | 0% | 0 | - |
+| 12h | A* + straight line | 3.15 | 1,380 | 27% | 0% | 0% | 0 | - |
+| 12h | landmarks measured this hour | 0.64 | 130 | 85% | 0% | 0% | 0 | 46 |
+| 12h | landmarks measured at night (3h) | 2.04 | 486 | 71% | 0% | 0% | 0 | 125 |
+| 12h | landmarks measured at 8h | 0.54 | 100 | 120% | 85% | 63% | +14.6% | 107 |
+| 15h | Dijkstra | 2.97 | 2,342 | - | 0% | 0% | 0 | - |
+| 15h | A* + straight line | 3.11 | 1,386 | 27% | 0% | 0% | 0 | - |
+| 15h | landmarks measured this hour | 0.68 | 128 | 85% | 0% | 0% | 0 | 47 |
+| 15h | landmarks measured at night (3h) | 2.13 | 494 | 71% | 0% | 0% | 0 | 125 |
+| 15h | landmarks measured at 8h | 0.56 | 96 | 120% | 85% | 57% | +15.5% | 107 |
+| 17h | Dijkstra | 2.95 | 2,364 | - | 0% | 0% | 0 | - |
+| 17h | A* + straight line | 3.48 | 1,506 | 24% | 0% | 0% | 0 | - |
+| 17h | landmarks measured this hour | 0.59 | 116 | 85% | 0% | 0% | 0 | 51 |
+| 17h | landmarks measured at night (3h) | 3.02 | 726 | 62% | 0% | 0% | 0 | 125 |
+| 17h | landmarks measured at 8h | 0.82 | 151 | 105% | 62% | 53% | +15.3% | 107 |
+| 18h | Dijkstra | 3.28 | 2,430 | - | 0% | 0% | 0 | - |
+| 18h | A* + straight line | 3.92 | 1,736 | 20% | 0% | 0% | 0 | - |
+| 18h | landmarks measured this hour | 0.63 | 133 | 88% | 0% | 0% | 0 | 48 |
+| 18h | landmarks measured at night (3h) | 3.84 | 920 | 51% | 0% | 0% | 0 | 125 |
+| 18h | landmarks measured at 8h | 1.76 | 377 | 89% | 25% | 37% | +7.1% | 107 |
+| 19h | Dijkstra | 3.08 | 2,456 | - | 0% | 0% | 0 | - |
+| 19h | A* + straight line | 3.86 | 1,734 | 20% | 0% | 0% | 0 | - |
+| 19h | landmarks measured this hour | 0.62 | 126 | 87% | 0% | 0% | 0 | 50 |
+| 19h | landmarks measured at night (3h) | 4.06 | 904 | 52% | 0% | 0% | 0 | 125 |
+| 19h | landmarks measured at 8h | 1.74 | 367 | 90% | 27% | 47% | +7.2% | 107 |
+| 21h | Dijkstra | 2.96 | 2,324 | - | 0% | 0% | 0 | - |
+| 21h | A* + straight line | 3.06 | 1,338 | 30% | 0% | 0% | 0 | - |
+| 21h | landmarks measured this hour | 0.78 | 131 | 85% | 0% | 0% | 0 | 67 |
+| 21h | landmarks measured at night (3h) | 1.53 | 305 | 77% | 0% | 0% | 0 | 125 |
+| 21h | landmarks measured at 8h | 0.62 | 96 | 131% | 90% | 47% | +14.8% | 107 |
+
+## RY. Trips from Yonsei University International Campus
+
+Same map, traffic model and methods as RM, but every trip starts at the campus corner on Songdogwahak-ro (roads.YONSEI). 30 goals, the same at every hour.
+
+![RY_trips.svg](charts/RY_trips.svg)
+
+![RY_time.svg](charts/RY_time.svg)
+
+![RY_accuracy.svg](charts/RY_accuracy.svg)
+
+![RY_wrong.svg](charts/RY_wrong.svg)
+
+| hour | method | time ms | points expanded | accuracy | points overestimated | queries with a longer route | worst extra time | landmark precompute ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3h | Dijkstra | 2.44 | 1,827 | - | 0% | 0% | 0 | - |
+| 3h | A* + straight line | 1.95 | 805 | 35% | 0% | 0% | 0 | - |
+| 3h | landmarks measured this hour | 0.69 | 112 | 88% | 0% | 0% | 0 | 125 |
+| 3h | landmarks measured at night (3h) | 0.66 | 112 | 88% | 0% | 0% | 0 | 125 |
+| 3h | landmarks measured at 8h | 0.58 | 88 | 157% | 97% | 33% | +19.4% | 107 |
+| 6h | Dijkstra | 2.50 | 1,900 | - | 0% | 0% | 0 | - |
+| 6h | A* + straight line | 2.14 | 905 | 30% | 0% | 0% | 0 | - |
+| 6h | landmarks measured this hour | 0.54 | 76 | 90% | 0% | 0% | 0 | 46 |
+| 6h | landmarks measured at night (3h) | 1.29 | 252 | 77% | 0% | 0% | 0 | 125 |
+| 6h | landmarks measured at 8h | 0.58 | 83 | 138% | 93% | 27% | +19.0% | 107 |
+| 7h | Dijkstra | 2.60 | 2,010 | - | 0% | 0% | 0 | - |
+| 7h | A* + straight line | 2.55 | 1,078 | 23% | 0% | 0% | 0 | - |
+| 7h | landmarks measured this hour | 0.53 | 83 | 89% | 0% | 0% | 0 | 45 |
+| 7h | landmarks measured at night (3h) | 2.54 | 460 | 59% | 0% | 0% | 0 | 125 |
+| 7h | landmarks measured at 8h | 0.61 | 88 | 104% | 68% | 10% | +1.2% | 107 |
+| 8h | Dijkstra | 2.82 | 2,076 | - | 0% | 0% | 0 | - |
+| 8h | A* + straight line | 3.13 | 1,205 | 19% | 0% | 0% | 0 | - |
+| 8h | landmarks measured this hour | 0.70 | 124 | 89% | 0% | 0% | 0 | 107 |
+| 8h | landmarks measured at night (3h) | 2.63 | 554 | 51% | 0% | 0% | 0 | 125 |
+| 8h | landmarks measured at 8h | 0.72 | 124 | 89% | 0% | 0% | 0 | 107 |
+| 9h | Dijkstra | 3.12 | 2,000 | - | 0% | 0% | 0 | - |
+| 9h | A* + straight line | 2.98 | 1,062 | 23% | 0% | 0% | 0 | - |
+| 9h | landmarks measured this hour | 0.56 | 82 | 89% | 0% | 0% | 0 | 49 |
+| 9h | landmarks measured at night (3h) | 2.24 | 446 | 59% | 0% | 0% | 0 | 125 |
+| 9h | landmarks measured at 8h | 0.58 | 85 | 104% | 70% | 7% | +2.8% | 107 |
+| 10h | Dijkstra | 2.60 | 1,925 | - | 0% | 0% | 0 | - |
+| 10h | A* + straight line | 2.33 | 952 | 27% | 0% | 0% | 0 | - |
+| 10h | landmarks measured this hour | 0.55 | 82 | 90% | 0% | 0% | 0 | 48 |
+| 10h | landmarks measured at night (3h) | 1.72 | 336 | 70% | 0% | 0% | 0 | 125 |
+| 10h | landmarks measured at 8h | 0.56 | 83 | 125% | 88% | 20% | +17.9% | 107 |
+| 12h | Dijkstra | 2.56 | 1,924 | - | 0% | 0% | 0 | - |
+| 12h | A* + straight line | 2.56 | 966 | 27% | 0% | 0% | 0 | - |
+| 12h | landmarks measured this hour | 0.50 | 76 | 90% | 0% | 0% | 0 | 46 |
+| 12h | landmarks measured at night (3h) | 1.73 | 337 | 70% | 0% | 0% | 0 | 125 |
+| 12h | landmarks measured at 8h | 0.59 | 83 | 125% | 88% | 20% | +17.5% | 107 |
+| 15h | Dijkstra | 2.71 | 1,916 | - | 0% | 0% | 0 | - |
+| 15h | A* + straight line | 2.47 | 955 | 27% | 0% | 0% | 0 | - |
+| 15h | landmarks measured this hour | 0.54 | 76 | 90% | 0% | 0% | 0 | 47 |
+| 15h | landmarks measured at night (3h) | 1.74 | 348 | 70% | 0% | 0% | 0 | 125 |
+| 15h | landmarks measured at 8h | 0.60 | 83 | 125% | 88% | 17% | +18.8% | 107 |
+| 17h | Dijkstra | 2.56 | 1,756 | - | 0% | 0% | 0 | - |
+| 17h | A* + straight line | 2.46 | 1,034 | 24% | 0% | 0% | 0 | - |
+| 17h | landmarks measured this hour | 0.58 | 85 | 89% | 0% | 0% | 0 | 51 |
+| 17h | landmarks measured at night (3h) | 2.25 | 468 | 62% | 0% | 0% | 0 | 125 |
+| 17h | landmarks measured at 8h | 0.72 | 120 | 112% | 74% | 17% | +2.7% | 107 |
+| 18h | Dijkstra | 2.46 | 1,718 | - | 0% | 0% | 0 | - |
+| 18h | A* + straight line | 2.76 | 1,140 | 21% | 0% | 0% | 0 | - |
+| 18h | landmarks measured this hour | 0.78 | 132 | 89% | 0% | 0% | 0 | 48 |
+| 18h | landmarks measured at night (3h) | 2.90 | 618 | 53% | 0% | 0% | 0 | 125 |
+| 18h | landmarks measured at 8h | 1.03 | 201 | 95% | 38% | 0% | 0 | 107 |
+| 19h | Dijkstra | 2.25 | 1,702 | - | 0% | 0% | 0 | - |
+| 19h | A* + straight line | 2.63 | 1,105 | 21% | 0% | 0% | 0 | - |
+| 19h | landmarks measured this hour | 0.63 | 98 | 89% | 0% | 0% | 0 | 50 |
+| 19h | landmarks measured at night (3h) | 2.81 | 620 | 52% | 0% | 0% | 0 | 125 |
+| 19h | landmarks measured at 8h | 1.14 | 205 | 95% | 38% | 7% | +0.3% | 107 |
+| 21h | Dijkstra | 2.56 | 1,875 | - | 0% | 0% | 0 | - |
+| 21h | A* + straight line | 2.34 | 908 | 30% | 0% | 0% | 0 | - |
+| 21h | landmarks measured this hour | 0.55 | 82 | 90% | 0% | 0% | 0 | 67 |
+| 21h | landmarks measured at night (3h) | 1.47 | 254 | 76% | 0% | 0% | 0 | 125 |
+| 21h | landmarks measured at 8h | 0.57 | 82 | 137% | 93% | 27% | +18.5% | 107 |
 
 ## Code size
 

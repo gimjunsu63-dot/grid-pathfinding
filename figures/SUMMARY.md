@@ -64,7 +64,12 @@ Only algorithms that returned the optimal path can win a condition; BFS is exclu
 
 ## Real road map (Songdo, OpenStreetMap)
 
-- Morning peak 8h: Dijkstra 2.7 ms, A* + straight line 3.4 ms (accuracy 19%), landmarks measured that hour 0.5 ms (accuracy 87%, 5.6x faster than Dijkstra).
-- Landmarks measured at night were optimal at every hour; at 8h their accuracy was 52% and they took 3.0 ms.
-- Landmarks measured at 8h, used at 3h (lighter traffic): 97% of points overestimated, 73% of queries got a longer route (worst +18.9%).
+- Morning peak 8h: Dijkstra 2.6 ms, A* + straight line 3.1 ms (accuracy 20%), landmarks measured that hour 0.5 ms (accuracy 86%, 5.0x faster than Dijkstra).
+- Landmarks measured at night were optimal at every hour; at 8h their accuracy was 54% and they took 2.5 ms.
+- Landmarks measured at 8h, used at 3h (lighter traffic): 96% of points overestimated, 70% of queries got a longer route (worst +18.9%).
+
+## Trips from Yonsei University (real road map)
+
+- 8h, 30 trips from the campus: Dijkstra 2.8 ms, A* + straight line 3.1 ms, landmarks measured that hour 0.7 ms (4.0x faster than Dijkstra).
+- Landmarks measured at 8h: used at 3h, 33% of trips got a longer route (worst +19.4%); used at 18h, 0% of trips got a longer route. Landmarks measured at night: optimal at every hour.
 - Measurement noise (IQR / median, same map 30 runs): BFS 17.0%, Dijkstra 8.9%, A* 19.5%.
