@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bidirectional  # noqa: E402
 import jps  # noqa: E402
 import landmarks  # noqa: E402
+import roads  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import search  # noqa: E402
 from svgchart import ALGO_COLORS, INK_2, MUTED, LinePlot, bar_chart, bar_panels, tint  # noqa: E402
@@ -46,6 +47,11 @@ DY_NAMES = {"dijkstra": "Dijkstra", "astar": "A* + Manhattan", "alt_new": "landm
             "alt_old": "landmarks, old (not recomputed)"}
 LP_NAMES = {"farthest": "farthest", "corners": "corners", "random": "random"}
 LP_SHORT = {"farthest": "far", "corners": "corner", "random": "rand"}
+RM_ALGS = ["dijkstra", "astar", "alt_now", "alt_night", "alt_rush"]
+RM_NAMES = {"dijkstra": "Dijkstra", "astar": "A* + straight line", "alt_now": "landmarks measured this hour",
+            "alt_night": "landmarks measured at night (3h)", "alt_rush": "landmarks measured at 8h"}
+RM_SHORT = {"dijkstra": "Dijkstra", "astar": "A* + straight line", "alt_now": "landmarks (now)",
+            "alt_night": "landmarks (from 3h)", "alt_rush": "landmarks (from 8h)"}
 
 
 # ---------------------------------------------------------------------------
@@ -792,6 +798,112 @@ def lp_section_table(table):
 
 
 # ---------------------------------------------------------------------------
+# real road map (RM)
+# ---------------------------------------------------------------------------
+
+
+def rm_table(rows):
+    """hour -> algorithm -> medians over queries, plus share of longer paths and the worst extra cost."""
+    per_q = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        per_q[(r["params"]["hour"], r["map_index"])][r["algorithm"]].append(r)
+    out = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for (hour, _), algs in per_q.items():
+        for alg, rs in algs.items():
+            o = out[hour][alg]
+            o["time"].append(statistics.median(x["time_ms"] for x in rs))
+            o["cells"].append(rs[0]["expanded"])
+            o["accuracy"].append(rs[0]["h_accuracy"] or 0.0)
+            o["over"].append(rs[0]["h_over"] or 0.0)
+            o["prep"].append(rs[0]["prep_ms"])
+            o["extra"].append((rs[0]["cost"] / rs[0]["optimal_cost"] - 1) * 100 if rs[0]["optimal_cost"] else 0)
+    table = {}
+    for hour in sorted(out):
+        table[hour] = {}
+        for alg, d in out[hour].items():
+            g = {m: statistics.median(v) for m, v in d.items() if m != "extra"}
+            g["wrong"] = sum(1 for e in d["extra"] if e > 0) / len(d["extra"]) * 100
+            g["worst"] = max(d["extra"])
+            g["queries"] = len(d["extra"])
+            table[hour][alg] = g
+    return table
+
+
+def _rm_style(alg):
+    return {"dijkstra": (ALGO_COLORS["dijkstra"], False), "astar": (ALGO_COLORS["astar"], False),
+            "alt_now": (ALGO_COLORS["alt"], False), "alt_night": (tint(ALGO_COLORS["alt"], 0.45), True),
+            "alt_rush": (ALGO_COLORS["jps"], True)}[alg]
+
+
+def chart_rm(table, out, network=None):
+    hours = sorted(table)
+    sub = (f"Songdo road network ({network.n:,} points, {len(network.eu):,} one-way segments), "
+           if network else "Songdo road network, ") + "traffic model, 8 landmarks. Medians of 30 start/goal pairs."
+    p = LinePlot("Real road map: query time over the day", "hour of the day", "search time (ms, median)",
+                 subtitle=sub, xticks=hours, xlim=(min(hours), max(hours)), width=900)
+    for alg in RM_ALGS:
+        color, dashed = _rm_style(alg)
+        p.line(hours, [table[h][alg]["time"] for h in hours], color, RM_SHORT[alg], dashed=dashed)
+    (out / "RM_time.svg").write_text(p.render())
+
+    q = LinePlot("Real road map: heuristic accuracy over the day", "hour of the day",
+                 "accuracy (mean of estimate / real remaining time)", subtitle=sub, xticks=hours,
+                 xlim=(min(hours), max(hours)), width=900, yfmt=lambda v: f"{v:.0%}")
+    for alg in ("astar", "alt_now", "alt_night", "alt_rush"):
+        color, dashed = _rm_style(alg)
+        q.line(hours, [table[h][alg]["accuracy"] for h in hours], color, RM_SHORT[alg], dashed=dashed)
+    q.reference([min(hours), max(hours)], [1.0, 1.0], "exact")
+    (out / "RM_accuracy.svg").write_text(q.render())
+
+    rush = [table[h]["alt_rush"] for h in hours]
+    (out / "RM_wrong.svg").write_text(bar_chart(
+        "Landmarks measured at 8h: wrong at almost every other hour", [f"{h}h" for h in hours], [
+            dict(label="points where the estimate is too high (%)", color=tint(ALGO_COLORS["jps"], 0.45),
+                 values=[g["over"] * 100 for g in rush]),
+            dict(label="queries answered with a longer route (%)", color=ALGO_COLORS["jps"],
+                 values=[g["wrong"] for g in rush]),
+        ], "% (median points / share of queries)", value_labels=True, value_fmt=lambda v: f"{v:.0f}",
+        subtitle="Landmarks measured at night (free flow): 0% at every hour (checked in every run).",
+        ylim=(0, 105), width=820))
+
+
+def chart_rm_model(network, out):
+    """The traffic model itself: mean travel time vs free flow, by road group and hour."""
+    hours = list(range(24))
+    p = LinePlot("Time-of-day traffic model (not measured traffic)", "hour of the day",
+                 "travel time / free-flow time (mean)", xticks=[0, 3, 6, 8, 12, 15, 18, 21, 23],
+                 xlim=(0, 23), width=760,
+                 subtitle="Peaks at 8h and 18-19h; big roads slow down more; no hour is faster than the night. "
+                          + ", ".join(f"{g} {sum(1 for x in network.group if x == g):,}" for g in roads.GROUPS)
+                          + " segments.")
+    shades = {"highway": 0.0, "arterial": 0.25, "collector": 0.5, "local": 0.7}
+    for grp in roads.GROUPS:
+        idx = [i for i, g in enumerate(network.group) if g == grp]
+        if not idx:
+            continue
+        ys = []
+        for h in hours:
+            m = network.multipliers(h)
+            ys.append(sum(m[i] for i in idx) / len(idx))
+        p.line(hours, ys, tint(ALGO_COLORS["astar"], shades[grp]), grp)
+    (out / "RM_model.svg").write_text(p.render())
+
+
+def rm_section_table(table):
+    rows = []
+    for hour, algs in table.items():
+        for alg in RM_ALGS:
+            g = algs[alg]
+            prep = f"{g['prep']:.0f}" if alg.startswith("alt") else "-"
+            rows.append([f"{hour}h", RM_NAMES[alg], f"{g['time']:.2f}", f"{g['cells']:,.0f}",
+                         "-" if alg == "dijkstra" else f"{g['accuracy']:.0%}", f"{g['over']:.0%}",
+                         f"{g['wrong']:.0f}%", f"+{g['worst']:.1f}%" if g["worst"] > 0 else "0", prep])
+    return md_table(["hour", "method", "time ms", "points expanded", "accuracy", "points overestimated",
+                     "queries with a longer route", "worst extra time", "landmark precompute ms"],
+                    rows, ["---", "---"] + ["---:"] * 7)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -812,7 +924,7 @@ def analyze(results_dir, out_dir, log=print):
     charts = out_dir / "charts"
     charts.mkdir(parents=True, exist_ok=True)
     data = {exp: load(results_dir, exp)
-            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "noise")}
+            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "RM", "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -969,6 +1081,22 @@ def analyze(results_dir, out_dir, log=print):
         section("LP. Landmark placement", ["LP_speedup.svg"], lp_section_table(table),
                 "farthest: each landmark is the cell farthest (by path cost) from those already chosen. "
                 "corners: cells nearest the map corners, then edge midpoints. random: seeded random cells.")
+
+    if data["RM"]:
+        table = rm_table(data["RM"])
+        quick = any(r["params"].get("network") == "songdo-center" for r in data["RM"])
+        net = roads.load_network(quick=quick) if roads.data_available() else None
+        chart_rm(table, charts, net)
+        images = ["RM_time.svg", "RM_accuracy.svg", "RM_wrong.svg"]
+        if net:
+            chart_rm_model(net, charts)
+            images.insert(0, "RM_model.svg")
+        section("RM. Real road map (Songdo, OpenStreetMap) over the day", images, rm_section_table(table),
+                "Map data (c) OpenStreetMap contributors, ODbL 1.0 (data/songdo_roads.json). Edge cost = travel time "
+                "in tenths of a second at that hour. The traffic is a model (src/roads.py), not measured traffic. "
+                "The straight-line heuristic divides the great-circle distance by the fastest free-flow speed. "
+                "Landmarks (8) are measured once per hour and reused by all queries of that hour. "
+                "Night landmarks are checked to be optimal in every run.")
 
     section("Code size", [], code_size_table(),
             "Lines of code without blank lines, comments and docstrings.")

@@ -65,6 +65,10 @@ class TestAnalyze(unittest.TestCase):
                          "HQ_prep.svg", "HQ_per_cell.svg", "DY_time.svg", "DY_accuracy.svg",
                          "DY_wrong.svg", "LP_speedup.svg"):
                 self.assertIn(name, charts)
+            if bench.roads.data_available():
+                for name in ("RM_model.svg", "RM_time.svg", "RM_accuracy.svg", "RM_wrong.svg"):
+                    self.assertIn(name, charts)
+                self.assertIn("Real road map", summary.build(res))
             for p in (out / "charts").glob("*.svg"):
                 ET.fromstring(p.read_text())
             text = (out / "RESULTS.md").read_text()

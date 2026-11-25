@@ -17,6 +17,8 @@ Experiments (see EXPERIMENTS below):
     DY          dynamic traffic: jams appear or clear after the landmarks were measured;
                 old landmarks vs recomputed landmarks vs Manhattan vs Dijkstra
     LP          landmark placement: farthest-point vs corners vs random, 4 and 8 landmarks
+    RM          real road map (Songdo, OpenStreetMap) at different hours of the day:
+                Dijkstra, A* + straight line, landmarks measured now / at night / at 8h
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -70,7 +72,8 @@ from bidirectional import bidirectional_dijkstra  # noqa: E402
 from grid import Grid8, manhattan  # noqa: E402
 from jps import jump_point_search  # noqa: E402
 from landmarks import PLACEMENTS, OracleHeuristic, accuracy_stats, landmark_heuristic, remaining_to_goal  # noqa: E402
-from maps import change_jams, component, make_map, open_cell_count  # noqa: E402
+import roads  # noqa: E402
+from maps import MapCase, change_jams, component, make_map, open_cell_count  # noqa: E402
 from search import astar, bfs, dijkstra  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -205,6 +208,39 @@ DYNAMIC = {
 }
 CHANGES = (0.1, 0.3, 0.5)
 
+ROAD_LANDMARKS = 8
+ROAD_HOURS = (3, 6, 7, 8, 9, 10, 12, 15, 17, 18, 19, 21)
+_ROAD_STATES = {}
+
+
+def prepare_road_landmarks(grid, start, goal, hour=None):
+    """Landmarks measured on the travel times of `hour` (default: the graph's own hour).
+
+    Measured once per network and hour, then reused by every query; prep_ms is
+    the time of that one measurement.
+    """
+    hour = grid.hour if hour is None else hour
+    key = (id(grid.network), hour)
+    if key not in _ROAD_STATES:
+        t0 = time.perf_counter_ns()
+        state = roads.road_landmarks(grid.network.graph_at(hour), ROAD_LANDMARKS)
+        state.prep_ms = (time.perf_counter_ns() - t0) / 1e6
+        _ROAD_STATES[key] = state
+    return _ROAD_STATES[key]
+
+
+ROADS = {
+    "dijkstra": Spec(dijkstra, heuristic=_h_zero),
+    "astar": Spec(astar, heuristic=_h_grid),                     # straight line / top speed
+    "alt_now": Spec(search_with, prepare=prepare_road_landmarks, heuristic=_h_state),
+    # night = free flow, the cheapest hour: theory says these stay exact at every hour
+    "alt_night": Spec(search_with, prepare=partial(prepare_road_landmarks, hour=roads.NIGHT),
+                      heuristic=_h_state),
+    # measured in the morning peak: may overestimate when traffic is lighter
+    "alt_rush": Spec(search_with, "any", prepare=partial(prepare_road_landmarks, hour=roads.RUSH),
+                     heuristic=_h_state),
+}
+
 # Baseline condition: change one thing at a time away from this.
 BASE = dict(kind="random", size=200, wall_ratio=0.2, weighted=False, endpoints="fixed")
 
@@ -236,6 +272,11 @@ def dyn(appear=0.0, clear=0.0):
     appear: share of free road cells that become jammed. clear: share of jams that clear.
     """
     return dict(jam(0.2), endpoints="random", jam_up=appear, jam_down=clear)
+
+
+def road(hour):
+    """Songdo road network at this hour of the day (time-of-day traffic model in roads.py)."""
+    return dict(kind="road", size=0, endpoints="random", hour=hour)
 
 
 # name -> (title, algorithm set, conditions)
@@ -318,9 +359,11 @@ EXPERIMENTS = {
         cond(kind="maze", endpoints="random"),
         dict(jam(0.2), endpoints="random"),
     ]),
+    "RM": ("real road map (Songdo, OpenStreetMap) by hour of day", ROADS, [road(h) for h in ROAD_HOURS]),
 }
 # DY answers each query once per map, so it uses more maps to count wrong answers.
-MAP_FACTOR = {"DY": 3}
+# RM: one map, so "maps" are start/goal pairs (30 per hour, the same pairs at every hour).
+MAP_FACTOR = {"DY": 3, "RM": 3}
 
 FIELDS = [
     "experiment", "condition", "kind", "size", "params", "endpoints",
@@ -388,6 +431,8 @@ def timed_run(fn, grid, start, goal):
 
 
 def condition_label(c):
+    if c["kind"] == "road":
+        return f"road-{'songdo-center' if c.get('quick') else 'songdo'}-{c['hour']:02d}h"
     parts = [c["kind"], str(c["size"])]
     if c.get("moves") == 8:
         parts.append("8dir")
@@ -404,7 +449,17 @@ def condition_label(c):
     return "-".join(parts)
 
 
+def build_road(c, seed):
+    net = roads.load_network(quick=c.get("quick", False))
+    graph = net.graph_at(c["hour"])
+    start, goal = roads.random_query(graph, seed)
+    params = dict(hour=c["hour"], network=net.name)
+    return MapCase("road", graph, start, goal, seed, 1, dict(params)), params
+
+
 def build_map(c, seed):
+    if c["kind"] == "road":
+        return build_road(c, seed)
     skip = ("kind", "size", "endpoints", "moves", "jam_up", "jam_down")
     params = {k: v for k, v in c.items() if k not in skip}
     case = make_map(c["kind"], c["size"], seed, endpoints=c["endpoints"], **params)
@@ -441,14 +496,21 @@ def check(name, result, optimal, case, rule="exact"):
 def map_info(exp, c, case, params, grid):
     ref = dijkstra(grid, case.start, case.goal)              # not timed
     optimal = ref.cost if ref.found else None
+    s, t = grid.index(case.start), grid.index(case.goal)
+    if case.kind == "road":           # every node reaches every other; "manhattan" = straight line in m
+        open_cells = reachable = grid.n
+        straight = round(grid.straight_m(s, t))
+    else:
+        open_cells, reachable = open_cell_count(grid), len(component(grid, case.start))
+        straight = manhattan(grid, s, t)
     info = dict(
         experiment=exp, condition=condition_label(c), kind=case.kind, size=c["size"],
         params=json.dumps(params, sort_keys=True), endpoints=c["endpoints"],
         seed=case.seed, attempts=case.attempts,
-        start=f"{case.start[0]} {case.start[1]}", goal=f"{case.goal[0]} {case.goal[1]}",
-        open_cells=open_cell_count(grid), reachable=len(component(grid, case.start)),
-        manhattan=manhattan(grid, grid.index(case.start), grid.index(case.goal)),
-        h_start=grid.heuristic(grid.index(case.start), grid.index(case.goal)),
+        start=" ".join(map(str, case.start)) if isinstance(case.start, tuple) else str(case.start),
+        goal=" ".join(map(str, case.goal)) if isinstance(case.goal, tuple) else str(case.goal),
+        open_cells=open_cells, reachable=reachable, manhattan=straight,
+        h_start=grid.heuristic(s, t),
         optimal_cost="" if optimal is None else optimal,
     )
     return info, optimal
@@ -467,14 +529,15 @@ def prepare_all(specs, case):
         try:
             t0 = time.perf_counter_ns()
             state = sp.prepare(grid, case.start, case.goal)
-            prep[name] = (time.perf_counter_ns() - t0) / 1e6
+            prep[name] = getattr(state, "prep_ms", None) or (time.perf_counter_ns() - t0) / 1e6
         finally:
             gc.enable()
         calls[name] = partial(sp.fn, state=state)
         calls[name].state = state
-    if grid.moves == 4 and any(sp.heuristic for sp in specs.values()):
+    exact_remaining = getattr(grid, "remaining_to", None)      # road graphs
+    if (grid.moves == 4 or exact_remaining) and any(sp.heuristic for sp in specs.values()):
         t = grid.index(case.goal)
-        rem = remaining_to_goal(grid, t)                    # not timed
+        rem = exact_remaining(t) if exact_remaining else remaining_to_goal(grid, t)   # not timed
         for name, sp in specs.items():
             if sp.heuristic:
                 h = sp.heuristic(grid, t, getattr(calls[name], "state", None))
@@ -546,8 +609,11 @@ def warm_up():
     case, _ = build_map(cond(size=50), BASE_SEED)
     case8, _ = build_map(cond(size=50, moves=8), BASE_SEED)
     case_dy, _ = build_map(dict(dyn(appear=0.1, clear=0.1), size=50), BASE_SEED)
-    for algos, c in ((MAIN, case), (TIE, case), (WEIGHTED, case), (HEAP, case), (BIDIR, case),
-                     (TRAFFIC, case), (MOVES8, case8), (HQ, case), (PLACED, case), (DYNAMIC, case_dy)):
+    tables = [(MAIN, case), (TIE, case), (WEIGHTED, case), (HEAP, case), (BIDIR, case),
+              (TRAFFIC, case), (MOVES8, case8), (HQ, case), (PLACED, case), (DYNAMIC, case_dy)]
+    if roads.data_available():
+        tables.append((ROADS, build_map(dict(road(roads.RUSH), quick=True), BASE_SEED)[0]))
+    for algos, c in tables:
         calls, _, _, _ = prepare_all({n: as_spec(v) for n, v in algos.items()}, c)
         for fn in calls.values():
             fn(c.grid, c.start, c.goal)
@@ -558,6 +624,8 @@ def quick_version(conditions):
     for c in conditions:
         c = dict(c)
         c["size"] = max(10, c["size"] // 8)     # keeps sizes distinct: 50,100,200,400 -> 10,12,25,50
+        if c["kind"] == "road":
+            c["quick"] = True                   # a small central part of Songdo
         out.append(c)
     return out
 
@@ -579,6 +647,9 @@ def run(experiments, out_dir, n_maps, repeats, quick=False, log=print):
                 n = 5 if quick else NOISE_REPEATS
                 rows = run_noise(n, writer, size=30 if quick else 200, log=log)
                 settings = dict(repeats=n, algorithms=list(MAIN))
+            elif exp == "RM" and not roads.data_available():
+                log("[RM] skipped: data/songdo_roads.json not found (run python3 tools/fetch_osm.py)")
+                rows, settings = 0, dict(skipped="no road data")
             else:
                 title, algos, conditions = EXPERIMENTS[exp]
                 if quick:

@@ -220,6 +220,24 @@ def build(results_dir):
                          f"({algs[best[8]]['speedup']:.1f}x)"
                          + (f", random with 4 {rand4['speedup']:.1f}x" if rand4 else ""))
         lines += ["", "## Landmark placement", "", "- Speed-up over Dijkstra. " + "; ".join(parts) + "."]
+    rm_rows = load(results_dir, "RM")
+    if rm_rows:
+        from analyze import rm_table
+        t = rm_table(rm_rows)
+        night = min(t)
+        peak = 8 if 8 in t else max(t)
+        d, now = t[peak]["dijkstra"], t[peak]["alt_now"]
+        lines += ["", "## Real road map (Songdo, OpenStreetMap)", ""]
+        lines.append(f"- Morning peak {peak}h: Dijkstra {d['time']:.1f} ms, A* + straight line "
+                     f"{t[peak]['astar']['time']:.1f} ms (accuracy {t[peak]['astar']['accuracy']:.0%}), "
+                     f"landmarks measured that hour {now['time']:.1f} ms (accuracy {now['accuracy']:.0%}, "
+                     f"{d['time'] / now['time']:.1f}x faster than Dijkstra).")
+        ni = t[peak]["alt_night"]
+        lines.append(f"- Landmarks measured at night were optimal at every hour; at {peak}h their accuracy was "
+                     f"{ni['accuracy']:.0%} and they took {ni['time']:.1f} ms.")
+        r = t[night]["alt_rush"]
+        lines.append(f"- Landmarks measured at 8h, used at {night}h (lighter traffic): {r['over']:.0%} of points "
+                     f"overestimated, {r['wrong']:.0f}% of queries got a longer route (worst +{r['worst']:.1f}%).")
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)

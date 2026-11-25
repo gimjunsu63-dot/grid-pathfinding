@@ -16,7 +16,7 @@
 출발점은 BFS · 다익스트라 · A* 비교(실험 A~E)였고, 거기서 "A*는 짐작이 부정확한 지도에서 다익스트라보다
 느려진다"는 결과가 나와 짐작의 정확도 자체를 주제로 삼았습니다. 정확도를 일정하게 조절한 기준
 (실제 남은 비용 × k)을 측정 도구로 써서 정확도와 탐색량의 관계를 재고, 랜드마크 개수와 미리 계산 비용,
-지도가 바뀌는 상황까지 봅니다.
+지도가 바뀌는 상황까지 봅니다. 마지막으로 실제 도로지도(송도, OpenStreetMap)에서 시간대별 정체를 넣어 같은 질문을 다시 확인합니다.
 
 - 저장소는 [`algorithm-env`](https://github.com/lec-algorithm/algorithm-env) 템플릿으로 만들었습니다.
 - Python 표준 모듈만 씁니다 (외부 라이브러리 없음).
@@ -34,7 +34,7 @@ make bench-quick   # 실험 전체를 아주 작은 지도로 빠르게 (동작 
 make figures       # 지도별로 세 알고리즘이 탐색한 칸과 경로를 그림으로 -> figures/maps/
 make analyze       # results/*.csv로 그래프와 표 만들기 -> figures/charts/, figures/RESULTS.md
 make summary       # 결과 한 장 요약 (조건별로 누가 이겼나 + 핵심 숫자) -> 터미널 + figures/SUMMARY.md
-make results       # bench + analyze + summary + figures 한 번에 (Codespaces에서 약 20분)
+make results       # bench + analyze + summary + figures 한 번에 (Codespaces에서 약 22분)
 ```
 
 **결과 보기**: [`figures/SUMMARY.md`](figures/SUMMARY.md) (한 장 요약), [`figures/RESULTS.md`](figures/RESULTS.md) (그래프와 표), [`figures/README.md`](figures/README.md) (지도별 탐색 범위 그림)
@@ -60,6 +60,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 │   ├── jps.py           # Jump Point Search (8방향, 비용이 모두 1인 지도)
 │   ├── landmarks.py     # 랜드마크 휴리스틱, 정확도 측정 도구(실제 비용 × k), 정확도 계산
 │   ├── maps.py          # 지도 생성 6종 + 랜덤 출발·도착 + 교통 변화(정체 생김/풀림)
+│   ├── roads.py         # 실제 도로지도(송도) 그래프, 시간대별 정체 모델, 방향 있는 그래프용 랜드마크
 │   ├── bench.py         # 실험 실행, 측정, CSV 저장
 │   ├── analyze.py       # CSV -> 그래프(SVG) + 표
 │   ├── summary.py       # CSV -> 한 장 요약 (조건별 승자, 핵심 숫자)
@@ -73,6 +74,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 │   ├── test_moves8.py    # 8방향 이동, 옥타일 거리, JPS
 │   ├── test_landmarks.py # 랜드마크, 정확도 측정 도구
 │   ├── test_dynamic.py   # 교통 변화, 예전 랜드마크, 랜드마크 위치
+│   ├── test_roads.py     # 도로 그래프, 일방통행, 정체 모델, 시간대별 랜드마크
 │   ├── test_analyze.py   # 그래프·분석 코드
 │   └── test_visualize.py # 그림 코드
 ├── results/         # 실험 결과 원본 (CSV) + 실행 환경 기록 (*.env.json)
@@ -145,6 +147,7 @@ python3 src/bench.py --maps 3 --repeats 2   # 지도 수, 반복 수 바꾸기
 | J | 교통 정체 | 도시 지도에서 모든 도로 비용 1, 정체 칸(비용 9) 비율만 0~50%로 바꿈 |
 | **HQ** | **휴리스틱 품질 (본 실험)** | 다익스트라, A* + 맨해튼, A* + 랜드마크 1·2·4·8·16개, 정확도 측정 도구 k = 0.25~1.5. 비용 1~9 랜덤 지도, 미로, 정체 20% 도시. 출발·도착 랜덤 |
 | **DY** | **동적 환경 (본 실험)** | 정체 20% 도시에서 랜드마크를 잰 뒤 교통이 바뀜: 정체 생김 +10·30·50%, 정체 풀림 10·30·50%. 예전 랜드마크 그대로 vs 다시 계산 vs 맨해튼 vs 다익스트라. 지도 30개 |
+| **RM** | **실제 도로지도** | 송도 도로망(OpenStreetMap), 시간대 12개(3~21시), 출발·도착 30쌍. 다익스트라, A* + 직선거리, 랜드마크(그 시간에 잼 / 밤에 잼 / 8시에 잼) |
 | LP | 랜드마크 위치 | 서로 가장 먼 칸 / 모서리 / 랜덤, 랜드마크 4·8개. HQ와 같은 지도 3종 |
 | noise | 측정 흔들림 | 같은 지도를 30번씩 반복해 시간이 얼마나 흔들리는지 |
 
@@ -202,6 +205,25 @@ JPS는 비용이 모두 같은 지도에서만 정답을 보장하므로 비용 
 - 지도마다 질의가 하나라서, 틀린 질의 비율을 세기 위해 지도를 30개 씁니다.
 - 짐작이 실제보다 큰 칸의 비율(`h_over`)도 모든 칸에서 셉니다 (실제보다 크지 않은 짐작이면 0).
 
+## 실제 도로지도 실험 (RM)
+
+격자 대신 실제 도로망에서 같은 질문을 확인합니다.
+
+- **지도**: [`data/songdo_roads.json`](data/README.md). 송도국제도시 일대 자동차 도로를 OpenStreetMap에서 한 번 받아
+  저장했습니다(`python3 tools/fetch_osm.py`). © OpenStreetMap contributors, ODbL 1.0.
+  일방통행을 지키고, 모든 지점끼리 오갈 수 있는 가장 큰 부분만 씁니다.
+- **비용**: 도로 구간 하나를 지나는 시간(0.1초 단위 정수). 자유 주행 속도는 도로 종류별 기본값
+  (고속도로 100, 간선 60, 보조 간선 50·40, 생활 도로 30 km/h)이고, `maxspeed`가 있으면 그 값을 씁니다.
+- **시간대별 정체 (모델)**: 실제 교통량이 아니라 규칙으로 만든 모델입니다(`src/roads.py`).
+  출퇴근 시간(8시, 18~19시)에 큰길이 더 많이 느려지고, 구간마다 늘 막히는 정도(시드 고정)와 시간마다 조금씩 흔들림을 넣었습니다.
+  밤(23~5시)은 자유 주행이고, 어느 시간도 밤보다 빠르지 않습니다.
+- **비교**: 다익스트라, A* + 직선거리(직선거리 ÷ 지도에서 가장 빠른 속도: 실제보다 클 수 없음, 맨해튼의 도로판),
+  랜드마크 8개를 그 시간에 잰 것 / 밤(3시)에 잰 것 / 출근 시간(8시)에 잰 것.
+- **이론**: 밤은 가장 빠른 시간이라 밤에 잰 랜드마크는 어느 시간에나 실제보다 크지 않습니다(DY와 같은 이유).
+  실험에서 매 실행 최단 경로인지 검사합니다. 8시에 잰 랜드마크는 덜 막히는 시간에 실제보다 커질 수 있습니다.
+- 도로망은 방향이 있는 그래프라서 랜드마크마다 정방향(L→x)과 역방향(x→L) 다익스트라를 한 번씩 돌립니다.
+- 지도 파일이 없으면 RM은 건너뜁니다.
+
 ## 랜드마크 위치 실험 (LP)
 
 같은 개수라도 어디에 두느냐에 따라 정확도가 달라집니다. 서로 가장 먼 칸을 차례로 고르기(경로 비용 기준),
@@ -257,6 +279,9 @@ JPS는 비용이 모두 같은 지도에서만 정답을 보장하므로 비용 
 11. 동적 환경: 정체가 생기면 비용이 오르기만 하고 벽은 그대로인지, 정체가 풀리면 내려가기만 하는지,
    정체가 생긴 뒤에도 예전 랜드마크가 모든 칸에서 실제보다 크지 않고 일관적이며 A*가 최적인지,
    정체가 풀리면 예전 짐작이 실제보다 커지는 칸이 실제로 생기는지, 세 가지 위치 선택 모두 최적 경로를 내는지
+12. 실제 도로지도: 제한 속도 읽기, 일방통행(`yes`, `-1`), 서로 오갈 수 없는 구간 제거, 어느 시간도 밤보다 빠르지 않은지,
+   직선거리 짐작이 실제보다 크지 않고 일관적인지, 밤에 잰 랜드마크가 모든 시간대에서 안전한지,
+   8시에 잰 랜드마크가 밤에는 실제보다 커지는지, A*·랜드마크가 다익스트라와 같은 비용을 내는지
 
 ## 참고 자료와 AI 사용
 
@@ -267,6 +292,7 @@ JPS는 비용이 모두 같은 지도에서만 정답을 보장하므로 비용 
 | D. Harabor, A. Grastien, "The JPS Pathfinding System", SoCS 2012 | `jps.py`: 벽 모서리를 스치는 대각선 이동을 막는 규칙에서도 JPS를 쓰는 방법 |
 | [PathFinding.js](https://github.com/qiao/PathFinding.js) (Xueqiao Xu, MIT 라이선스)의 "OnlyWhenNoObstacles" JPS | `jps.py`: 모서리 통과 금지일 때의 이웃 고르기·점프 규칙을 참고해 파이썬으로 다시 작성 (코드 복사 아님) |
 | [lec-algorithm/algorithm-env](https://github.com/lec-algorithm/algorithm-env) | 저장소 템플릿 (Makefile, 컨테이너 설정) |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) (© OpenStreetMap contributors, ODbL 1.0) | `data/songdo_roads.json`: 실험 RM의 송도 도로망 |
 
 - 외부 라이브러리는 쓰지 않습니다. 우선순위 큐는 Python 표준 모듈 `heapq`, 큐는 `collections.deque`를 씁니다
   (`binheap.py`는 비교용으로 직접 짠 힙).

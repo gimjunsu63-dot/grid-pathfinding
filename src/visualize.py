@@ -17,6 +17,7 @@ expands (except the goal, where it stops). RecordingGrid logs those calls,
 so the picture shows the real code's behavior, in the real order.
 """
 
+import math
 import struct
 import sys
 import zlib
@@ -27,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench import timed_run  # noqa: E402
 from grid import WALL, Grid, Grid8  # noqa: E402
 from jps import jump_point_search  # noqa: E402
+import roads  # noqa: E402
 from landmarks import landmark_heuristic  # noqa: E402
 from search import astar  # noqa: E402
 from maps import make_map  # noqa: E402
@@ -118,6 +120,27 @@ class Canvas:
         for yy in range(y0, y1):
             start = (yy * self.width + x0) * 3
             self.pixels[start:start + len(row)] = row
+
+    def dot(self, x, y, color, r=0):
+        self.rect(x - r, y - r, 2 * r + 1, 2 * r + 1, color)
+
+    def line(self, x0, y0, x1, y1, color, width=1):
+        """Bresenham line; width > 1 stamps a small square at every point."""
+        r = (width - 1) // 2
+        dx, dy = abs(x1 - x0), -abs(y1 - y0)
+        sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+        err = dx + dy
+        while True:
+            self.dot(x0, y0, color, r)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
 
     def save_png(self, path):
         raw = bytearray()
@@ -248,6 +271,71 @@ def draw_case_landmarks(case, path_png, count=4, panel_px=360):
     return stats
 
 
+class RecordingRoad:
+    """Wraps a RoadGraph and records the order in which nodes are expanded."""
+
+    def __init__(self, graph):
+        self.graph = graph
+        self.order = []
+
+    def __getattr__(self, name):
+        return getattr(self.graph, name)
+
+    def neighbors(self, idx):
+        self.order.append(idx)
+        return self.graph.neighbors(idx)
+
+
+ROAD_GRAY = (214, 212, 205)
+
+
+def draw_case_roads(graph, start, goal, path_png, landmarks_state, panel_px=440):
+    """Dijkstra | A* + straight line | A* + landmarks on the real road map, one query."""
+    lat, lon = graph.lat, graph.lon
+    lat0, lat1, lon0, lon1 = min(lat), max(lat), min(lon), max(lon)
+    kx = math.cos(math.radians((lat0 + lat1) / 2))            # meters per degree differ in x and y
+    w_deg, h_deg = (lon1 - lon0) * kx, lat1 - lat0
+    scale = (panel_px - 1) / max(w_deg, h_deg)
+    pw, ph = int(w_deg * scale) + 1, int(h_deg * scale) + 1
+
+    def xy(v, ox):
+        return ox + int((lon[v] - lon0) * kx * scale), GAP + int((lat1 - lat[v]) * scale)
+
+    runs = [
+        ("dijkstra", lambda g, s, t: ALGORITHMS["dijkstra"](g, s, t), COLORS["dijkstra"]),
+        ("astar", lambda g, s, t: astar(g, s, t), COLORS["astar"]),
+        ("alt", lambda g, s, t: astar(g, s, t, heuristic=landmarks_state), COLORS["alt"]),
+    ]
+    canvas = Canvas(3 * pw + 4 * GAP, ph + 2 * GAP)
+    stats = {}
+    for k, (name, fn, colors) in enumerate(runs):
+        ox = GAP + k * (pw + GAP)
+        for u, lst in enumerate(graph.adj):
+            x0, y0 = xy(u, ox)
+            for v, _ in lst:
+                canvas.line(x0, y0, *xy(v, ox), ROAD_GRAY)
+        rec = RecordingRoad(graph)
+        result = fn(rec, start, goal)
+        light = _mix(BACKGROUND, colors["explored"], 0.75)
+        for u in rec.order:
+            x0, y0 = xy(u, ox)
+            for v, _ in graph.adj[u]:
+                canvas.line(x0, y0, *xy(v, ox), light)
+        for a, b in zip(result.path, result.path[1:]):
+            canvas.line(*xy(a, ox), *xy(b, ox), colors["path"], width=3)
+        _, ms = timed_run(fn, graph, start, goal)
+        for v, color in ((start, START_COLOR), (goal, GOAL_COLOR)):
+            canvas.dot(*xy(v, ox), (255, 255, 255), 5)
+            canvas.dot(*xy(v, ox), color, 4)
+        if name == "alt":
+            for m in landmarks_state.landmarks:
+                canvas.dot(*xy(m, ox), (255, 255, 255), 5)
+                canvas.dot(*xy(m, ox), JUMP_POINT_COLOR, 4)
+        stats[name] = dict(cost=result.cost, expanded=result.expanded, time_ms=ms)
+    canvas.save_png(path_png)
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # gallery
 # ---------------------------------------------------------------------------
@@ -340,6 +428,29 @@ def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
             lines.append(f"| {label} | {st['cost']} | {st['expanded']} | {st['time_ms']:.2f} |")
         lines.append("")
         log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
+
+    if roads.data_available():
+        road_dir = out_dir / "roads"
+        road_dir.mkdir(parents=True, exist_ok=True)
+        net = roads.load_network()
+        lines += [
+            "# Real road map (Songdo, OpenStreetMap)", "",
+            "Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that hour** on the same "
+            "start (red) and goal (purple). Light color = road segments leaving the points each search expanded, "
+            "dark line = route found, black dots = landmarks. Map data (c) OpenStreetMap contributors, ODbL 1.0.", "",
+        ]
+        for hour, title in ((roads.RUSH, "8h (morning peak)"), (roads.NIGHT, "3h (night, free flow)")):
+            graph = net.graph_at(hour)
+            start, goal = roads.random_query(graph, seed, min_m=3000 if graph.n > 2000 else 300)
+            png = road_dir / f"songdo-{hour:02d}h.png"
+            stats = draw_case_roads(graph, start, goal, png, roads.road_landmarks(graph, 8))
+            lines += [f"## {title}", "", f"![songdo {hour}h](roads/{png.name})", "",
+                      "| | travel time (s) | points expanded | time (ms) |", "| --- | ---: | ---: | ---: |"]
+            for alg, st in stats.items():
+                label = {"dijkstra": "Dijkstra", "astar": "A* + straight line", "alt": "A* + 8 landmarks"}[alg]
+                lines.append(f"| {label} | {st['cost'] / 10:.0f} | {st['expanded']} | {st['time_ms']:.2f} |")
+            lines.append("")
+            log(f"  {png.relative_to(out_dir.parent) if png.is_relative_to(out_dir.parent) else png}")
 
     maps8 = out_dir / "maps8"
     maps8.mkdir(parents=True, exist_ok=True)
