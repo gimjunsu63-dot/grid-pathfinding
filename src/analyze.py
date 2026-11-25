@@ -41,6 +41,11 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ["bfs", "dijkstra", "astar"]
 NAMES = {"bfs": "BFS", "dijkstra": "Dijkstra", "astar": "A*", "bidir": "Bidirectional", "jps": "JPS"}
 HQ_MAPS = {"random": "random 20%, cost 1-9", "maze": "maze", "city": "city, jams 20%"}
+DY_ALGS = ["dijkstra", "astar", "alt_new", "alt_old"]
+DY_NAMES = {"dijkstra": "Dijkstra", "astar": "A* + Manhattan", "alt_new": "landmarks, recomputed",
+            "alt_old": "landmarks, old (not recomputed)"}
+LP_NAMES = {"farthest": "farthest", "corners": "corners", "random": "random"}
+LP_SHORT = {"farthest": "far", "corners": "corner", "random": "rand"}
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +71,7 @@ def load(results_dir, exp):
             r["scanned"] = int(r["scanned"]) if r.get("scanned") else 0
             r["prep_ms"] = float(r["prep_ms"]) if r.get("prep_ms") else 0.0
             r["h_accuracy"] = float(r["h_accuracy"]) if r.get("h_accuracy") else None
+            r["h_over"] = float(r["h_over"]) if r.get("h_over") else None
             rows.append(r)
     return rows
 
@@ -628,6 +634,164 @@ def hq_section_table(table):
 
 
 # ---------------------------------------------------------------------------
+# dynamic traffic (DY) and landmark placement (LP)
+# ---------------------------------------------------------------------------
+
+
+def dy_change(r):
+    """Signed change in percent: +30 = 30% of free road cells jammed, -30 = 30% of jams cleared."""
+    p = r["params"]
+    return round((p.get("jam_up", 0) - p.get("jam_down", 0)) * 100)
+
+
+def dy_label(ch):
+    return "no change" if ch == 0 else (f"jams +{ch}%" if ch > 0 else f"jams cleared {-ch}%")
+
+
+def dy_table(rows):
+    """change -> algorithm -> medians over maps (time, cells, accuracy, overestimated cells, precompute)
+    plus the share of queries answered with a longer path and the worst extra cost."""
+    per_map = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        per_map[(dy_change(r), r["map_index"])][r["algorithm"]].append(r)
+    out = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for (ch, _), algs in per_map.items():
+        for alg, rs in algs.items():
+            o = out[ch][alg]
+            o["time"].append(statistics.median(x["time_ms"] for x in rs))
+            o["cells"].append(rs[0]["expanded"])
+            o["accuracy"].append(rs[0]["h_accuracy"] or 0.0)
+            o["over"].append(rs[0]["h_over"] or 0.0)
+            o["prep"].append(rs[0]["prep_ms"])
+            o["extra"].append((rs[0]["cost"] / rs[0]["optimal_cost"] - 1) * 100 if rs[0]["optimal_cost"] else 0)
+    table = {}
+    for ch in sorted(out):
+        table[ch] = {}
+        for alg, d in out[ch].items():
+            g = {m: statistics.median(v) for m, v in d.items() if m != "extra"}
+            g["wrong"] = sum(1 for e in d["extra"] if e > 0) / len(d["extra"]) * 100
+            g["worst"] = max(d["extra"])
+            g["maps"] = len(d["extra"])
+            table[ch][alg] = g
+    return table
+
+
+def _dy_style(alg):
+    if alg == "alt_old":
+        return tint(ALGO_COLORS["alt"], 0.45), True
+    return ALGO_COLORS["alt" if alg == "alt_new" else alg], False
+
+
+def chart_dy(table, out):
+    changes = sorted(table)
+    ticks = changes
+    xfmt = lambda v: "0" if v == 0 else f"{abs(v):g}%"   # noqa: E731
+    xlabel = "<- share of jams cleared            |            share of free road jammed ->"
+    sub = ("City 200 x 200 with 20% jams. Old landmarks were measured before the change. "
+           "Medians of 30 maps, random start and goal.")
+    p = LinePlot("After the traffic changes: query time", xlabel, "search time (ms, median)",
+                 subtitle=sub, xticks=ticks, xfmt=xfmt, width=760)
+    for alg in DY_ALGS:
+        color, dashed = _dy_style(alg)
+        p.line(changes, [table[c][alg]["time"] for c in changes], color, DY_NAMES[alg], dashed=dashed)
+    (out / "DY_time.svg").write_text(p.render())
+
+    q = LinePlot("After the traffic changes: heuristic accuracy", xlabel,
+                 "accuracy (mean of estimate / real remaining cost)", subtitle=sub, xticks=ticks, xfmt=xfmt,
+                 width=760, yfmt=lambda v: f"{v:.0%}")
+    for alg in ("astar", "alt_new", "alt_old"):
+        color, dashed = _dy_style(alg)
+        q.line(changes, [table[c][alg]["accuracy"] for c in changes], color, DY_NAMES[alg], dashed=dashed)
+    q.reference([changes[0], changes[-1]], [1.0, 1.0], "exact")
+    (out / "DY_accuracy.svg").write_text(q.render())
+
+    cats = [dy_label(c).replace("jams cleared ", "cleared\n").replace("jams ", "jams\n") for c in changes]
+    old = [table[c]["alt_old"] for c in changes]
+    (out / "DY_wrong.svg").write_text(bar_chart(
+        "Old landmarks: safe when jams appear, wrong when jams clear", cats, [
+            dict(label="cells where the old estimate is too high (%)", color=tint(ALGO_COLORS["alt"], 0.45),
+                 values=[g["over"] * 100 for g in old]),
+            dict(label="queries answered with a longer path (%)", color=ALGO_COLORS["alt"],
+                 values=[g["wrong"] for g in old]),
+        ], "% (median cells / share of queries)", value_labels=True, value_fmt=lambda v: f"{v:.0f}",
+        subtitle="Recomputed landmarks, Manhattan and Dijkstra: 0% in every condition (checked in every run).",
+        ylim=(0, 105), width=820))
+
+
+def dy_section_table(table):
+    rows = []
+    for ch, algs in table.items():
+        new, old = algs["alt_new"], algs["alt_old"]
+        for alg in DY_ALGS:
+            g = algs[alg]
+            pay = "-"
+            if alg == "alt_new" and ch != 0:
+                saved = old["time"] - new["time"]
+                pay = f"{new['prep'] / saved:.0f}" if saved > 0 else "never (old is as fast)"
+            prep = "-" if alg in ("dijkstra", "astar") else ("0 (already paid)" if alg == "alt_old" else f"{g['prep']:.0f}")
+            rows.append([dy_label(ch), DY_NAMES[alg], f"{g['time']:.2f}", f"{g['cells']:,.0f}",
+                         "-" if alg == "dijkstra" else f"{g['accuracy']:.0%}", f"{g['over']:.0%}",
+                         f"{g['wrong']:.0f}%", f"+{g['worst']:.1f}%" if g["worst"] > 0 else "0", prep, pay])
+    return md_table(["change", "method", "time ms", "cells", "accuracy", "cells overestimated",
+                     "queries with a longer path", "worst extra cost", "precompute after the change (ms)",
+                     "queries to pay off recomputing (vs old)"], rows, ["---", "---"] + ["---:"] * 8)
+
+
+def lp_table(rows):
+    """map kind -> algorithm -> medians over maps: time, accuracy, cells, speed-up over Dijkstra."""
+    per_map = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        per_map[(r["kind"], r["map_index"])][r["algorithm"]].append(r)
+    out = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for (kind, _), algs in per_map.items():
+        d_time = statistics.median(x["time_ms"] for x in algs["dijkstra"])
+        for alg, rs in algs.items():
+            t = statistics.median(x["time_ms"] for x in rs)
+            o = out[kind][alg]
+            o["time"].append(t)
+            o["accuracy"].append(rs[0]["h_accuracy"] or 0.0)
+            o["cells"].append(rs[0]["expanded"])
+            o["speedup"].append(d_time / t)
+    return {k: {a: {m: statistics.median(v) for m, v in d.items()} for a, d in algs.items()}
+            for k, algs in out.items()}
+
+
+def lp_order(algs):
+    return [a for n in (4, 8) for pl in LP_NAMES for a in [f"alt{n}_{pl}"] if a in algs]
+
+
+def chart_lp(table, out):
+    shades = {"farthest": 0.0, "corners": 0.35, "random": 0.65}
+    panels = []
+    for kind, algs in table.items():
+        order = lp_order(algs)
+        panels.append(dict(
+            title=HQ_MAPS.get(kind, kind),
+            categories=[f"{LP_SHORT[a.split('_')[1]]} {a[3:].split('_')[0]}" for a in order],
+            values=[algs[a]["speedup"] for a in order],
+            labels=[f"{algs[a]['accuracy']:.0%}" for a in order],
+            colors=[tint(ALGO_COLORS["alt"], shades[a.split("_")[1]]) for a in order],
+        ))
+    (out / "LP_speedup.svg").write_text(bar_panels(
+        "Where to put the landmarks: farthest-point, corners or random", panels,
+        "speed-up over Dijkstra (x, median)",
+        subtitle="Bars: farthest-point (dark), corners (middle), random (light); 4 then 8 landmarks. "
+                 "Labels: heuristic accuracy.", width=1000, height=360))
+
+
+def lp_section_table(table):
+    rows = []
+    for kind, algs in table.items():
+        for a in lp_order(algs):
+            n, pl = a[3:].split("_")
+            g = algs[a]
+            rows.append([HQ_MAPS.get(kind, kind), n, LP_NAMES[pl], f"{g['accuracy']:.0%}", f"{g['cells']:,.0f}",
+                         f"{g['time']:.2f}", f"{g['speedup']:.1f}x"])
+    return md_table(["map", "landmarks", "placement", "accuracy", "cells", "time ms", "speed-up over Dijkstra"],
+                    rows, ["---", "---:", "---"] + ["---:"] * 4)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -648,7 +812,7 @@ def analyze(results_dir, out_dir, log=print):
     charts = out_dir / "charts"
     charts.mkdir(parents=True, exist_ok=True)
     data = {exp: load(results_dir, exp)
-            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "noise")}
+            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -787,6 +951,24 @@ def analyze(results_dir, out_dir, log=print):
                 "Precomputation fitted as a + b x landmarks: "
                 + ", ".join(f"{HQ_MAPS.get(k, k)}: {a:.0f} ms + {b:.1f} ms per landmark (R² {r2:.3f})"
                             for k, (a, b, r2) in hq_slopes.items()) + ".")
+
+    if data["DY"]:
+        table = dy_table(data["DY"])
+        chart_dy(table, charts)
+        section("DY. Dynamic traffic: old landmarks vs recomputed",
+                ["DY_time.svg", "DY_accuracy.svg", "DY_wrong.svg"], dy_section_table(table),
+                "The landmarks are measured on the jammed city, then the traffic changes and the same "
+                "landmarks are used without measuring again (old), or measured again on the new map "
+                "(recomputed). Jams +x%: x% of free road cells become jammed (costs only rise). "
+                "Jams cleared x%: x% of jammed cells become free (some costs fall). "
+                "Old landmarks are checked to be optimal in every run where costs only rose. "
+                "Queries to pay off recomputing = precomputation time / time saved per query compared with the old landmarks.")
+    if data["LP"]:
+        table = lp_table(data["LP"])
+        chart_lp(table, charts)
+        section("LP. Landmark placement", ["LP_speedup.svg"], lp_section_table(table),
+                "farthest: each landmark is the cell farthest (by path cost) from those already chosen. "
+                "corners: cells nearest the map corners, then edge midpoints. random: seeded random cells.")
 
     section("Code size", [], code_size_table(),
             "Lines of code without blank lines, comments and docstrings.")

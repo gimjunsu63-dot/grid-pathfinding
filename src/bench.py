@@ -14,6 +14,9 @@ Experiments (see EXPERIMENTS below):
     J           traffic jams: share of jammed road cells in a city, 0% to 50%
     HQ          heuristic quality: Dijkstra, A* + Manhattan, A* + landmarks (1-16),
                 and the accuracy ruler h = k x real remaining cost
+    DY          dynamic traffic: jams appear or clear after the landmarks were measured;
+                old landmarks vs recomputed landmarks vs Manhattan vs Dijkstra
+    LP          landmark placement: farthest-point vs corners vs random, 4 and 8 landmarks
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -38,8 +41,12 @@ Reference values stored with every row (computed once per map, not timed):
   optimal_cost  optimal path cost (from Dijkstra), empty if no path
 
 Per algorithm and map (not timed as search time):
-  prep_ms       precomputation before the search (landmark distances, ruler), 0 if none
+  prep_ms       precomputation before the search (landmark distances, ruler), 0 if none.
+                For old landmarks (DY) it is the original precomputation, paid BEFORE the
+                traffic changed; after the change they cost nothing.
   h_accuracy    mean over cells of h(v) / real remaining cost (4-direction maps only)
+  h_over        share of those cells where h(v) is larger than the real remaining cost
+                (0 for every heuristic that never overestimates)
 """
 
 import argparse
@@ -62,8 +69,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bidirectional import bidirectional_dijkstra  # noqa: E402
 from grid import Grid8, manhattan  # noqa: E402
 from jps import jump_point_search  # noqa: E402
-from landmarks import OracleHeuristic, accuracy, landmark_heuristic, remaining_to_goal  # noqa: E402
-from maps import component, make_map, open_cell_count  # noqa: E402
+from landmarks import PLACEMENTS, OracleHeuristic, accuracy_stats, landmark_heuristic, remaining_to_goal  # noqa: E402
+from maps import change_jams, component, make_map, open_cell_count  # noqa: E402
 from search import astar, bfs, dijkstra  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +85,8 @@ class Spec:
 
     fn         fn(grid, start, goal), or fn(grid, start, goal, state) when prepare is set
     rule       check() rule: "exact" = optimal cost, "any" = a path no cheaper than optimal
-               (BFS), float w = at most w x optimal (weighted A*)
+               (BFS), float w = at most w x optimal (weighted A*),
+               "exact_if_costs_rise" = optimal unless some jams cleared (old landmarks)
     needs      "uniform": only run where every open cell costs 1 (JPS)
     prepare    prepare(grid, start, goal) -> state, run once per map; its time is prep_ms
     heuristic  heuristic(grid, goal_index, state) -> h(v, t), used for h_accuracy
@@ -171,6 +179,32 @@ HQ.update({f"ruler{k:g}": Spec(search_with, "exact" if k <= 1 else float(k),
                                prepare=partial(prepare_ruler, k=k), heuristic=_h_state)
            for k in RULER_KS})
 
+def prepare_placed(grid, start, goal, count, placement):
+    return landmark_heuristic(grid, start, count, placement=placement)
+
+
+PLACED = {"dijkstra": Spec(dijkstra, heuristic=_h_zero)}
+PLACED.update({f"alt{n}_{pl}": Spec(search_with, prepare=partial(prepare_placed, count=n, placement=pl),
+                                    heuristic=_h_state)
+               for n in (4, 8) for pl in PLACEMENTS})
+
+
+def prepare_old_landmarks(grid, start, goal, count):
+    """Landmarks measured on the map as it was BEFORE the traffic changed (grid.before)."""
+    return landmark_heuristic(grid.before, start, count, placement="farthest")
+
+
+DYNAMIC_LANDMARKS = 8          # the best count on the jammed city in experiment HQ
+DYNAMIC = {
+    "dijkstra": Spec(dijkstra, heuristic=_h_zero),
+    "astar": Spec(astar, heuristic=_h_grid),
+    "alt_new": Spec(search_with, prepare=partial(prepare_landmarks, count=DYNAMIC_LANDMARKS),
+                    heuristic=_h_state),
+    "alt_old": Spec(search_with, "exact_if_costs_rise",
+                    prepare=partial(prepare_old_landmarks, count=DYNAMIC_LANDMARKS), heuristic=_h_state),
+}
+CHANGES = (0.1, 0.3, 0.5)
+
 # Baseline condition: change one thing at a time away from this.
 BASE = dict(kind="random", size=200, wall_ratio=0.2, weighted=False, endpoints="fixed")
 
@@ -194,6 +228,14 @@ def is_uniform(c):
 def jam(p):
     """City where every road costs 1 except jammed cells (cost 9): only the jam share changes."""
     return cond(kind="city", weighted=True, local_cost=1, jam_arterials=True, jam_ratio=p)
+
+
+def dyn(appear=0.0, clear=0.0):
+    """Jammed city (20%) whose traffic changes after the landmarks were measured.
+
+    appear: share of free road cells that become jammed. clear: share of jams that clear.
+    """
+    return dict(jam(0.2), endpoints="random", jam_up=appear, jam_down=clear)
 
 
 # name -> (title, algorithm set, conditions)
@@ -269,7 +311,16 @@ EXPERIMENTS = {
         cond(kind="maze", endpoints="random"),
         dict(jam(0.2), endpoints="random"),
     ]),
+    "DY": ("dynamic traffic: old vs recomputed landmarks", DYNAMIC,
+           [dyn()] + [dyn(appear=p) for p in CHANGES] + [dyn(clear=p) for p in CHANGES]),
+    "LP": ("landmark placement", PLACED, [
+        cond(weighted=True, endpoints="random"),
+        cond(kind="maze", endpoints="random"),
+        dict(jam(0.2), endpoints="random"),
+    ]),
 }
+# DY answers each query once per map, so it uses more maps to count wrong answers.
+MAP_FACTOR = {"DY": 3}
 
 FIELDS = [
     "experiment", "condition", "kind", "size", "params", "endpoints",
@@ -277,7 +328,7 @@ FIELDS = [
     "open_cells", "reachable", "manhattan", "h_start", "optimal_cost",
     "rep", "order", "algorithm",
     "time_ms", "found", "cost", "steps", "expanded", "stale", "max_frontier", "scanned",
-    "prep_ms", "h_accuracy",
+    "prep_ms", "h_accuracy", "h_over",
 ]
 
 
@@ -343,6 +394,8 @@ def condition_label(c):
     for key in ("wall_ratio", "loop_ratio", "jam_ratio"):
         if key in c:
             parts.append(f"{key.split('_')[0]}{c[key]}")
+    if "jam_up" in c:
+        parts.append(f"up{c['jam_up']}-down{c['jam_down']}")
     if c["kind"] == "terrain":
         parts.append("weighted")
     elif "weighted" in c:
@@ -352,11 +405,18 @@ def condition_label(c):
 
 
 def build_map(c, seed):
-    params = {k: v for k, v in c.items() if k not in ("kind", "size", "endpoints", "moves")}
+    skip = ("kind", "size", "endpoints", "moves", "jam_up", "jam_down")
+    params = {k: v for k, v in c.items() if k not in skip}
     case = make_map(c["kind"], c["size"], seed, endpoints=c["endpoints"], **params)
     if c.get("moves") == 8:
         case.grid = Grid8.from_grid(case.grid)
         params = dict(params, moves=8)
+    if "jam_up" in c:                       # dynamic traffic: search the changed map,
+        before = case.grid                  # keep the old one for old landmarks
+        case.grid = change_jams(before, seed, appear=c["jam_up"], clear=c["jam_down"])
+        case.grid.before = before
+        params = dict(params, jam_up=c["jam_up"], jam_down=c["jam_down"])
+        case.params = dict(case.params, jam_up=c["jam_up"], jam_down=c["jam_down"])
     return case, params
 
 
@@ -368,6 +428,8 @@ def check(name, result, optimal, case, rule="exact"):
         return
     if not result.found:
         raise AssertionError(f"{where}: missed an existing path")
+    if rule == "exact_if_costs_rise":       # theory: old landmarks stay safe while costs only rise
+        rule = "any" if case.params.get("jam_down") else "exact"
     if result.cost < optimal:
         raise AssertionError(f"{where}: cost {result.cost} below optimal {optimal}")
     if rule == "exact" and result.cost != optimal:
@@ -395,7 +457,7 @@ def map_info(exp, c, case, params, grid):
 def prepare_all(specs, case):
     """Run every prepare step once (timed as prep_ms) and measure heuristic accuracy."""
     grid = case.grid
-    calls, prep, acc = {}, {}, {}
+    calls, prep, acc, over = {}, {}, {}, {}
     for name, sp in specs.items():
         if sp.prepare is None:
             calls[name] = sp.fn
@@ -415,13 +477,14 @@ def prepare_all(specs, case):
         rem = remaining_to_goal(grid, t)                    # not timed
         for name, sp in specs.items():
             if sp.heuristic:
-                acc[name] = accuracy(sp.heuristic(grid, t, getattr(calls[name], "state", None)), t, rem)
-    return calls, prep, acc
+                h = sp.heuristic(grid, t, getattr(calls[name], "state", None))
+                acc[name], over[name] = accuracy_stats(h, t, rem)
+    return calls, prep, acc, over
 
 
 def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
     specs = {name: as_spec(v) for name, v in algos.items()}
-    calls, prep, acc = prepare_all(specs, case)
+    calls, prep, acc, over = prepare_all(specs, case)
     names = list(specs)
     for rep in range(repeats):
         k = rep % len(names)
@@ -439,6 +502,7 @@ def run_map(algos, case, info, optimal, repeats, writer, times, expanded):
                 max_frontier=result.max_frontier, scanned=result.scanned,
                 prep_ms=f"{prep[name]:.4f}" if name in prep else 0,
                 h_accuracy="" if acc.get(name) is None else f"{acc[name]:.5f}",
+                h_over="" if over.get(name) is None else f"{over[name]:.5f}",
             ))
             times[name].append(ms)
             expanded[name].append(result.expanded)
@@ -481,9 +545,10 @@ def run_noise(n_repeats, writer, size=200, log=print):
 def warm_up():
     case, _ = build_map(cond(size=50), BASE_SEED)
     case8, _ = build_map(cond(size=50, moves=8), BASE_SEED)
+    case_dy, _ = build_map(dict(dyn(appear=0.1, clear=0.1), size=50), BASE_SEED)
     for algos, c in ((MAIN, case), (TIE, case), (WEIGHTED, case), (HEAP, case), (BIDIR, case),
-                     (TRAFFIC, case), (MOVES8, case8), (HQ, case)):
-        calls, _, _ = prepare_all({n: as_spec(v) for n, v in algos.items()}, c)
+                     (TRAFFIC, case), (MOVES8, case8), (HQ, case), (PLACED, case), (DYNAMIC, case_dy)):
+        calls, _, _, _ = prepare_all({n: as_spec(v) for n, v in algos.items()}, c)
         for fn in calls.values():
             fn(c.grid, c.start, c.goal)
 
@@ -519,10 +584,11 @@ def run(experiments, out_dir, n_maps, repeats, quick=False, log=print):
                 if quick:
                     conditions = quick_version(conditions)
                 log(f"[{exp}] {title}   (median time / median expanded cells)")
-                rows = sum(run_condition(exp, algos, c, n_maps, repeats, writer, log)
+                maps = n_maps * MAP_FACTOR.get(exp, 1)
+                rows = sum(run_condition(exp, algos, c, maps, repeats, writer, log)
                            for c in conditions)
                 settings = dict(title=title, algorithms=list(algos), conditions=conditions,
-                                n_maps=n_maps, repeats=repeats)
+                                n_maps=maps, repeats=repeats)
         elapsed = time.perf_counter() - t0
         meta = dict(
             experiment=exp, rows=rows, seconds=round(elapsed, 1), quick=quick,

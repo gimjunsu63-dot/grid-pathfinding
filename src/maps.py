@@ -351,6 +351,28 @@ def city_map(height, width, seed, block=6, arterial_every=4, weighted=True,
 # ---------------------------------------------------------------------------
 
 
+def change_jams(grid, seed, appear=0.0, clear=0.0, free_cost=1, jam_cost=9):
+    """The same map after traffic changes (dynamic-environment experiment).
+
+    appear  share of free road cells (cost free_cost) that become jammed (jam_cost)
+    clear   share of jammed cells that become free again
+    Walls never change, so every pair of cells stays connected exactly as before.
+    Returns a new grid; the input grid is not modified.
+
+    One random number is drawn per cell, so the cells jammed with appear=0.1 are
+    a subset of those jammed with appear=0.3 (bigger changes contain smaller ones).
+    """
+    rng = _rng(seed, "traffic change")
+    costs = list(grid.costs)
+    for i, c in enumerate(grid.costs):
+        u = rng.random()
+        if c == free_cost and u < appear:
+            costs[i] = jam_cost
+        elif c == jam_cost and u < clear:
+            costs[i] = free_cost
+    return type(grid)(grid.height, grid.width, costs)
+
+
 def pick_random_endpoints(case, min_distance=None, max_attempts=10000):
     """Replace start/goal with two random cells of the start's component.
 

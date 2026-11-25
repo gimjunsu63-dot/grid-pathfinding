@@ -33,6 +33,15 @@ Accuracy
 --------
 accuracy(h) = mean over reachable cells v (v != goal) of h(v) / d(v -> t).
 1.0 is perfect, 0.0 is Dijkstra (no information).
+
+Old landmarks after the map changes (dynamic-environment experiment)
+--------------------------------------------------------------------
+Landmark distances measured on the OLD map give h_old(v) <= d_old(v -> t).
+  - Costs only went up (new jams): d_old(v -> t) <= d_new(v -> t), so h_old is
+    still a lower bound, and h_old(u) <= c_old(u, v) + h_old(v) <= c_new(u, v) + h_old(v)
+    keeps it consistent. A* stays optimal, the estimate just gets less accurate.
+  - Some costs went down (jams cleared): d_new can be smaller than d_old, so
+    h_old may overestimate and A* may return a longer path.
 """
 
 import heapq
@@ -198,15 +207,28 @@ def zero_heuristic(v, t):
     return 0
 
 
-def accuracy(h, goal, remaining):
-    """Mean of h(v) / d(v -> goal) over cells that can reach the goal (goal excluded)."""
-    total, n = 0.0, 0
+def accuracy_stats(h, goal, remaining):
+    """Over cells that can reach the goal (goal excluded):
+    (mean of h(v) / d(v -> goal), share of cells where h(v) > d(v -> goal)).
+
+    The second number is 0 for every admissible heuristic. It becomes positive
+    for the ruler with k > 1 and for landmarks measured before jams cleared.
+    """
+    total, over, n = 0.0, 0, 0
     for v, rem in enumerate(remaining):
         if rem == INF or rem == 0 or v == goal:
             continue
-        total += h(v, goal) / rem
+        est = h(v, goal)
+        total += est / rem
+        if est > rem + 1e-9:
+            over += 1
         n += 1
-    return total / n if n else None
+    return (total / n, over / n) if n else (None, None)
+
+
+def accuracy(h, goal, remaining):
+    """Mean of h(v) / d(v -> goal) over cells that can reach the goal (goal excluded)."""
+    return accuracy_stats(h, goal, remaining)[0]
 
 
 def landmark_heuristic(grid, start, count, placement="farthest", seed=0):

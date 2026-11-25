@@ -178,6 +178,48 @@ def build(results_dir):
                             "queries to pay off precompute"], rows, ["---"] + ["---:"] * 7), ""]
         lines.append("- Landmarks need precomputation (one Dijkstra per landmark), so they pay off only when the "
                      "same map answers several queries; see the last column.")
+    dy_rows = load(results_dir, "DY")
+    if dy_rows:
+        from analyze import dy_table
+        t = dy_table(dy_rows)
+        ups = [c for c in t if c > 0]
+        downs = [c for c in t if c < 0]
+        lines += ["", "## Dynamic traffic (old landmarks vs recomputed)", ""]
+        if 0 in t and ups:
+            top = max(ups)
+            old, new, d = t[top]["alt_old"], t[top]["alt_new"], t[top]["dijkstra"]
+            acc = ", ".join(f"{t[c]['alt_old']['accuracy']:.0%}" for c in [0] + sorted(ups))
+            pays = []
+            for c in sorted(ups):
+                gain = t[c]["alt_old"]["time"] - t[c]["alt_new"]["time"]
+                pays.append(f"{t[c]['alt_new']['prep'] / gain:.0f}" if gain > 0 else "never")
+            lines.append(f"- Jams appear (costs only rise): old landmarks were optimal in every run; their accuracy "
+                         f"fell {acc} (no change -> +{top}%), and at +{top}% they took {old['time']:.1f} ms vs "
+                         f"Dijkstra {d['time']:.1f} ms and recomputed landmarks {new['time']:.1f} ms. "
+                         f"Recomputing ({new['prep']:.0f} ms) paid off after {' / '.join(pays)} queries "
+                         f"({' / '.join(f'+{c}%' for c in sorted(ups))}).")
+        if downs:
+            low = min(downs)
+            o = t[low]["alt_old"]
+            wrong = ", ".join(f"{t[c]['alt_old']['wrong']:.0f}%" for c in sorted(downs, reverse=True))
+            lines.append(f"- Jams clear (some costs fall): old landmarks overestimated in {o['over']:.0%} of cells "
+                         f"at {-low}% cleared; queries answered with a longer path: {wrong} "
+                         f"(cleared {', '.join(f'{-c}%' for c in sorted(downs, reverse=True))}), "
+                         f"worst +{o['worst']:.1f}% cost. Fast, but no longer correct.")
+    lp_rows = load(results_dir, "LP")
+    if lp_rows:
+        from analyze import HQ_MAPS, LP_NAMES, lp_table
+        t = lp_table(lp_rows)
+        parts = []
+        for kind, algs in t.items():
+            best = {n: max((a for a in algs if a.startswith(f"alt{n}_")), key=lambda a: algs[a]["speedup"])
+                    for n in (4, 8)}
+            rand4 = algs.get("alt4_random")
+            parts.append(f"{HQ_MAPS.get(kind, kind)}: best {LP_NAMES[best[4].split('_')[1]]} with 4 "
+                         f"({algs[best[4]]['speedup']:.1f}x), {LP_NAMES[best[8].split('_')[1]]} with 8 "
+                         f"({algs[best[8]]['speedup']:.1f}x)"
+                         + (f", random with 4 {rand4['speedup']:.1f}x" if rand4 else ""))
+        lines += ["", "## Landmark placement", "", "- Speed-up over Dijkstra. " + "; ".join(parts) + "."]
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)
