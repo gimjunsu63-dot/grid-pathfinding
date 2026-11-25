@@ -23,12 +23,21 @@ landmarks       ALT on a directed graph (one-way streets): one Dijkstra from eac
 
 Time-of-day model (a model, not measured traffic)
 -------------------------------------------------
-travel time = free-flow time x (1 + SLOWDOWN[group] x rush(hour) x bottleneck[edge] x wobble[edge, hour])
+travel time = free-flow time x (1 + SLOWDOWN[group] x rush(hour) x bottleneck[edge]
+                                   x wobble[edge, hour] x direction[edge, hour])
 
   rush(hour)    0 at night (23h-5h), peaks at 8h and 18-19h, 0.35 at midday
   SLOWDOWN      extra time at the worst hour, as a share of free flow
   bottleneck    seeded random per segment, 0.4-1.6 (some roads are worse every day)
   wobble        seeded random per segment and hour, 0.85-1.15
+  direction     commute direction: 1 + 0.6 x toward[edge] x tide(hour), 0.4-1.6
+                  toward  cosine between the segment's direction and the direction to the
+                          centre of Songdo (Central Park, business district): +1 heading in,
+                          -1 heading out
+                  tide    +1 in the morning peak, -1 in the evening peak, about 0 at midday,
+                          so roads into the centre are slower in the morning and roads out
+                          of it in the evening (traffic toward Songdo jams in the morning:
+                          see the report for the news source)
 
 Every factor is >= 0, so no hour is faster than free flow at night. Landmarks
 measured at night are therefore lower bounds at every hour (see landmarks.py
@@ -58,6 +67,11 @@ GROUP = {
 }
 SLOWDOWN = {"highway": 1.5, "arterial": 1.2, "collector": 0.8, "local": 0.3}
 GROUPS = ("highway", "arterial", "collector", "local")
+CENTER = (37.3926, 126.6393)                  # Songdo Central Park (business district)
+# Yonsei University International Campus (85 Songdogwahak-ro): the campus corner on Songdogwahak-ro,
+# across from Triple Street. Found by laying the road data over a Google Maps screenshot of the campus.
+YONSEI = (37.38018, 126.66759)
+DIRECTIONAL = 0.6                             # how much the commute direction matters
 NIGHT = 3                                     # an hour with free-flow traffic
 RUSH = 8                                      # the morning peak
 
@@ -82,14 +96,25 @@ def parse_maxspeed(text):
     return round(v * 1.609) if "mph" in str(text) else v
 
 
+def _morning(hour):
+    return math.exp(-((hour - 8.0) / 1.1) ** 2 / 2)
+
+
+def _evening(hour):
+    return math.exp(-((hour - 18.5) / 1.4) ** 2 / 2)
+
+
 def rush(hour):
     """How busy the roads are, 0 (night) to 1 (worst hour)."""
     if hour < 5 or hour >= 23:
         return 0.0
-    morning = math.exp(-((hour - 8.0) / 1.1) ** 2 / 2)
-    evening = math.exp(-((hour - 18.5) / 1.4) ** 2 / 2)
     midday = 0.35 if 10 <= hour <= 16 else 0.0
-    return max(morning, evening, midday)
+    return max(_morning(hour), _evening(hour), midday)
+
+
+def tide(hour):
+    """Which way commuters go: +1 into the centre (morning), -1 out of it (evening)."""
+    return _morning(hour) - _evening(hour)
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +136,23 @@ class RoadNetwork:
         self.vmax = max(speed)
         rng = random.Random(f"{seed}:bottleneck")
         self.bottleneck = [rng.uniform(0.4, 1.6) for _ in eu]
+        self.toward = [self._toward_center(u, v) for u, v in zip(eu, ev)]
         self.seed = seed
         self._graphs = {}
 
     def __len__(self):
         return self.n
+
+    def _toward_center(self, u, v):
+        """Cosine between segment u->v and the direction from its midpoint to CENTER (0 near the centre)."""
+        k = math.cos(math.radians(CENTER[0]))
+        dx, dy = (self.lon[v] - self.lon[u]) * k, self.lat[v] - self.lat[u]
+        mx, my = (self.lon[u] + self.lon[v]) / 2, (self.lat[u] + self.lat[v]) / 2
+        cx, cy = (CENTER[1] - mx) * k, CENTER[0] - my
+        nd, nc = math.hypot(dx, dy), math.hypot(cx, cy)
+        if nd == 0 or nc * 111_000 < 200:            # within 200 m of the centre: no direction
+            return 0.0
+        return (dx * cx + dy * cy) / (nd * nc)
 
     def free_flow_seconds(self):
         return [L / s for L, s in zip(self.length, self.speed)]
@@ -125,8 +162,9 @@ class RoadNetwork:
         if r == 0:
             return [1.0] * len(self.eu)
         rng = random.Random(f"{self.seed}:wobble:{hour}")
-        return [1.0 + SLOWDOWN[g] * r * b * rng.uniform(0.85, 1.15)
-                for g, b in zip(self.group, self.bottleneck)]
+        td = tide(hour)
+        return [1.0 + SLOWDOWN[g] * r * b * rng.uniform(0.85, 1.15) * (1 + DIRECTIONAL * c * td)
+                for g, b, c in zip(self.group, self.bottleneck, self.toward)]
 
     def costs_at(self, hour):
         """Travel time of every segment at this hour, in tenths of a second (integer, >= 1)."""
@@ -385,13 +423,23 @@ def road_landmarks(graph, count):
     return DirectedLandmarkHeuristic(marks, fwd, bwd, hour=graph.hour)
 
 
-def random_query(graph, seed, min_m=None):
-    """A seeded random (start, goal) pair at least min_m meters apart in a straight line."""
+def nearest_node(graph, place):
+    """The road point closest to (lat, lon) in a straight line."""
+    lat, lon = place
+    return min(range(graph.n), key=lambda v: haversine(lat, lon, graph.lat[v], graph.lon[v]))
+
+
+def random_query(graph, seed, min_m=None, start=None):
+    """A seeded random (start, goal) pair at least min_m meters apart in a straight line.
+
+    With start given, only the goal is random (trips from one place).
+    """
     rng = random.Random(f"{seed}:road-query")
     if min_m is None:
         min_m = 1500 if graph.n > 2000 else 300
     for _ in range(10_000):
-        s, t = rng.randrange(graph.n), rng.randrange(graph.n)
+        s = rng.randrange(graph.n) if start is None else start
+        t = rng.randrange(graph.n)
         if s != t and graph.straight_m(s, t) >= min_m:
             return s, t
     raise RuntimeError("no start/goal pair far enough apart")

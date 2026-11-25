@@ -8,7 +8,7 @@
 #   make figures      pictures of what each algorithm explored -> figures/maps/
 #   make analyze      charts + tables from results/*.csv -> figures/charts/, figures/RESULTS.md
 #   make summary      one-page summary of all results (terminal + figures/SUMMARY.md)
-#   make results      bench + analyze + summary + figures (everything, about 7 minutes)
+#   make results      bench + analyze + summary + figures (everything, about 27 minutes in Codespaces)
 #   make clean        remove caches
 
 .PHONY: all run maps test bench bench-quick figures analyze summary results clean

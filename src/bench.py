@@ -19,6 +19,7 @@ Experiments (see EXPERIMENTS below):
     LP          landmark placement: farthest-point vs corners vs random, 4 and 8 landmarks
     RM          real road map (Songdo, OpenStreetMap) at different hours of the day:
                 Dijkstra, A* + straight line, landmarks measured now / at night / at 8h
+    RY          the same, but every trip starts at Yonsei University International Campus
     noise       same map many times: how much does the clock wobble?
 
 Output (one file per experiment):
@@ -274,9 +275,12 @@ def dyn(appear=0.0, clear=0.0):
     return dict(jam(0.2), endpoints="random", jam_up=appear, jam_down=clear)
 
 
-def road(hour):
-    """Songdo road network at this hour of the day (time-of-day traffic model in roads.py)."""
-    return dict(kind="road", size=0, endpoints="random", hour=hour)
+def road(hour, start="random"):
+    """Songdo road network at this hour of the day (time-of-day traffic model in roads.py).
+
+    start="yonsei": every trip starts at Yonsei University International Campus.
+    """
+    return dict(kind="road", size=0, endpoints=start, hour=hour)
 
 
 # name -> (title, algorithm set, conditions)
@@ -360,10 +364,13 @@ EXPERIMENTS = {
         dict(jam(0.2), endpoints="random"),
     ]),
     "RM": ("real road map (Songdo, OpenStreetMap) by hour of day", ROADS, [road(h) for h in ROAD_HOURS]),
+    "RY": ("real road map, every trip from Yonsei University International Campus", ROADS,
+           [road(h, start="yonsei") for h in ROAD_HOURS]),
 }
 # DY answers each query once per map, so it uses more maps to count wrong answers.
 # RM: one map, so "maps" are start/goal pairs (30 per hour, the same pairs at every hour).
-MAP_FACTOR = {"DY": 3, "RM": 3}
+# RY: same, with the start fixed at Yonsei (30 goals).
+MAP_FACTOR = {"DY": 3, "RM": 3, "RY": 3}
 
 FIELDS = [
     "experiment", "condition", "kind", "size", "params", "endpoints",
@@ -432,7 +439,9 @@ def timed_run(fn, grid, start, goal):
 
 def condition_label(c):
     if c["kind"] == "road":
-        return f"road-{'songdo-center' if c.get('quick') else 'songdo'}-{c['hour']:02d}h"
+        where = "songdo-center" if c.get("quick") else "songdo"
+        frm = "-from-yonsei" if c.get("endpoints") == "yonsei" else ""
+        return f"road-{where}{frm}-{c['hour']:02d}h"
     parts = [c["kind"], str(c["size"])]
     if c.get("moves") == 8:
         parts.append("8dir")
@@ -452,7 +461,8 @@ def condition_label(c):
 def build_road(c, seed):
     net = roads.load_network(quick=c.get("quick", False))
     graph = net.graph_at(c["hour"])
-    start, goal = roads.random_query(graph, seed)
+    fixed = roads.nearest_node(graph, roads.YONSEI) if c.get("endpoints") == "yonsei" else None
+    start, goal = roads.random_query(graph, seed, start=fixed)
     params = dict(hour=c["hour"], network=net.name)
     return MapCase("road", graph, start, goal, seed, 1, dict(params)), params
 
@@ -647,8 +657,8 @@ def run(experiments, out_dir, n_maps, repeats, quick=False, log=print):
                 n = 5 if quick else NOISE_REPEATS
                 rows = run_noise(n, writer, size=30 if quick else 200, log=log)
                 settings = dict(repeats=n, algorithms=list(MAIN))
-            elif exp == "RM" and not roads.data_available():
-                log("[RM] skipped: data/songdo_roads.json not found (run python3 tools/fetch_osm.py)")
+            elif exp in ("RM", "RY") and not roads.data_available():
+                log(f"[{exp}] skipped: data/songdo_roads.json not found (run python3 tools/fetch_osm.py)")
                 rows, settings = 0, dict(skipped="no road data")
             else:
                 title, algos, conditions = EXPERIMENTS[exp]

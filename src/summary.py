@@ -238,6 +238,24 @@ def build(results_dir):
         r = t[night]["alt_rush"]
         lines.append(f"- Landmarks measured at 8h, used at {night}h (lighter traffic): {r['over']:.0%} of points "
                      f"overestimated, {r['wrong']:.0f}% of queries got a longer route (worst +{r['worst']:.1f}%).")
+    ry_rows = load(results_dir, "RY")
+    if ry_rows:
+        from analyze import rm_table
+        t = rm_table(ry_rows)
+        peak = 8 if 8 in t else max(t)
+        eve = 18 if 18 in t else max(t)
+        d, now = t[peak]["dijkstra"], t[peak]["alt_now"]
+        night_wrong = max(t[h]["alt_night"]["wrong"] for h in t)
+        lines += ["", "## Trips from Yonsei University (real road map)", ""]
+        lines.append(f"- {peak}h, {d['queries']} trips from the campus: Dijkstra {d['time']:.1f} ms, A* + straight line "
+                     f"{t[peak]['astar']['time']:.1f} ms, landmarks measured that hour {now['time']:.1f} ms "
+                     f"({d['time'] / now['time']:.1f}x faster than Dijkstra).")
+        night = min(t)
+        used = "; ".join(f"used at {h}h, {t[h]['alt_rush']['wrong']:.0f}% of trips got a longer route"
+                         + (f" (worst +{t[h]['alt_rush']['worst']:.1f}%)" if t[h]["alt_rush"]["worst"] > 0 else "")
+                         for h in dict.fromkeys((night, eve)))
+        lines.append(f"- Landmarks measured at 8h: {used}. Landmarks measured at night: "
+                     + ("optimal at every hour." if night_wrong == 0 else f"up to {night_wrong:.0f}% wrong."))
     n_rows = load(results_dir, "noise")
     if n_rows:
         by = defaultdict(list)

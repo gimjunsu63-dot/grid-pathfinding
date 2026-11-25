@@ -433,18 +433,24 @@ def make_figures(out_dir=OUT_DIR, size=60, seed=2026, log=print):
         road_dir = out_dir / "roads"
         road_dir.mkdir(parents=True, exist_ok=True)
         net = roads.load_network()
+        for old in road_dir.glob("*.png"):          # file names changed over time: keep only this run's
+            old.unlink()
         lines += [
-            "# Real road map (Songdo, OpenStreetMap)", "",
-            "Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that hour** on the same "
-            "start (red) and goal (purple). Light color = road segments leaving the points each search expanded, "
-            "dark line = route found, black dots = landmarks. Map data (c) OpenStreetMap contributors, ODbL 1.0.", "",
+            "# Real road map (Songdo, OpenStreetMap): Yonsei University -> Central Park", "",
+            "Left to right: **Dijkstra | A* + straight line | A* + 8 landmarks measured that hour**. "
+            "Start (red) = Yonsei University International Campus (corner on Songdogwahak-ro), "
+            "goal (purple) = Songdo Central Park, the centre of the traffic model. "
+            "Light color = road segments leaving the points each search expanded, dark line = route found, "
+            "black dots = landmarks. Map data (c) OpenStreetMap contributors, ODbL 1.0.", "",
         ]
-        for hour, title in ((roads.RUSH, "8h (morning peak)"), (roads.NIGHT, "3h (night, free flow)")):
+        for hour, title in ((roads.RUSH, "8h (morning peak: heading into the centre is slow)"),
+                            (18, "18h (evening peak: heading out of the centre is slow)"),
+                            (roads.NIGHT, "3h (night, free flow)")):
             graph = net.graph_at(hour)
-            start, goal = roads.random_query(graph, seed, min_m=3000 if graph.n > 2000 else 300)
-            png = road_dir / f"songdo-{hour:02d}h.png"
+            start, goal = roads.nearest_node(graph, roads.YONSEI), roads.nearest_node(graph, roads.CENTER)
+            png = road_dir / f"yonsei-centralpark-{hour:02d}h.png"
             stats = draw_case_roads(graph, start, goal, png, roads.road_landmarks(graph, 8))
-            lines += [f"## {title}", "", f"![songdo {hour}h](roads/{png.name})", "",
+            lines += [f"## {title}", "", f"![Yonsei to Central Park {hour}h](roads/{png.name})", "",
                       "| | travel time (s) | points expanded | time (ms) |", "| --- | ---: | ---: | ---: |"]
             for alg, st in stats.items():
                 label = {"dijkstra": "Dijkstra", "astar": "A* + straight line", "alt": "A* + 8 landmarks"}[alg]

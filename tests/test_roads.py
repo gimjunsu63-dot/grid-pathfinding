@@ -75,6 +75,19 @@ class TestNetwork(unittest.TestCase):
             self.assertTrue(all(c >= n for c, n in zip(self.net.costs_at(hour), night)))
         self.assertGreater(sum(self.net.costs_at(roads.RUSH)), 1.3 * sum(night))
 
+    def test_commute_direction(self):
+        """Into the centre is slower in the morning, out of it in the evening; nothing beats the night."""
+        self.assertAlmostEqual(roads.tide(8), 1.0, places=2)
+        self.assertLess(roads.tide(18.5), -0.99)
+        self.assertLess(abs(roads.tide(12)), 0.01)
+        inward = [i for i, c in enumerate(self.net.toward) if c > 0.7]
+        outward = [i for i, c in enumerate(self.net.toward) if c < -0.7]
+        self.assertTrue(inward and outward)
+        for hour, slower, faster in ((8, inward, outward), (18, outward, inward)):
+            m = self.net.multipliers(hour)
+            self.assertGreater(sum(m[i] for i in slower) / len(slower), sum(m[i] for i in faster) / len(faster))
+            self.assertTrue(all(x >= 1.0 for x in m))
+
     def test_straight_line_never_overestimates_and_is_consistent(self):
         g = self.net.graph_at(roads.RUSH)
         for seed in range(5):
@@ -116,6 +129,27 @@ class TestNetwork(unittest.TestCase):
                 self.assertEqual(astar(g, s, t, heuristic=h).cost, best)
 
 
+class TestFixedStart(unittest.TestCase):
+    def setUp(self):
+        self.g = roads.network_from_osm(street_grid()).graph_at(roads.RUSH)
+
+    def test_nearest_node(self):
+        v = 7
+        self.assertEqual(roads.nearest_node(self.g, (self.g.lat[v], self.g.lon[v])), v)
+
+    def test_trips_from_one_place(self):
+        start = roads.nearest_node(self.g, (self.g.lat[0], self.g.lon[0]))
+        goals = set()
+        for seed in range(10):
+            s, t = roads.random_query(self.g, seed, min_m=300, start=start)
+            self.assertEqual(s, start)
+            self.assertGreaterEqual(self.g.straight_m(s, t), 300)
+            goals.add(t)
+        self.assertGreater(len(goals), 1)
+        self.assertEqual(roads.random_query(self.g, 3, min_m=300, start=start),
+                         roads.random_query(self.g, 3, min_m=300, start=start))
+
+
 @unittest.skipUnless(roads.data_available(), "data/songdo_roads.json not downloaded yet")
 class TestSongdoData(unittest.TestCase):
     def test_songdo_map_loads(self):
@@ -124,6 +158,13 @@ class TestSongdoData(unittest.TestCase):
         g = net.graph_at(roads.RUSH)
         s, t = roads.random_query(g, 2026)
         self.assertEqual(astar(g, s, t).cost, dijkstra(g, s, t).cost)
+
+    def test_yonsei_is_on_the_map(self):
+        g = roads.load_network().graph_at(roads.RUSH)
+        v = roads.nearest_node(g, roads.YONSEI)
+        self.assertLess(roads.haversine(*roads.YONSEI, g.lat[v], g.lon[v]), 50)
+        c = roads.nearest_node(g, roads.CENTER)
+        self.assertEqual(astar(g, v, c).cost, dijkstra(g, v, c).cost)
 
 
 if __name__ == "__main__":

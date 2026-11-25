@@ -36,7 +36,8 @@ import landmarks  # noqa: E402
 import roads  # noqa: E402
 import grid as grid_mod  # noqa: E402
 import search  # noqa: E402
-from svgchart import ALGO_COLORS, INK_2, MUTED, LinePlot, bar_chart, bar_panels, tint  # noqa: E402
+from svgchart import (ALGO_COLORS, FONT, INK, INK_2, MUTED, SURFACE, LinePlot, bar_chart,  # noqa: E402
+                      bar_panels, tint)
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ["bfs", "dijkstra", "astar"]
@@ -835,29 +836,34 @@ def _rm_style(alg):
             "alt_rush": (ALGO_COLORS["jps"], True)}[alg]
 
 
-def chart_rm(table, out, network=None):
+def chart_rm(table, out, network=None, prefix="RM"):
     hours = sorted(table)
+    yonsei = prefix == "RY"
+    who = "Real road map" if not yonsei else "Trips from Yonsei University"
+    trips = "30 start/goal pairs" if not yonsei else "30 trips from Yonsei University International Campus"
     sub = (f"Songdo road network ({network.n:,} points, {len(network.eu):,} one-way segments), "
-           if network else "Songdo road network, ") + "traffic model, 8 landmarks. Medians of 30 start/goal pairs."
-    p = LinePlot("Real road map: query time over the day", "hour of the day", "search time (ms, median)",
+           if network else "Songdo road network, ") + f"traffic model, 8 landmarks. Medians of {trips}."
+    p = LinePlot(f"{who}: query time over the day", "hour of the day", "search time (ms, median)",
                  subtitle=sub, xticks=hours, xlim=(min(hours), max(hours)), width=900)
     for alg in RM_ALGS:
         color, dashed = _rm_style(alg)
         p.line(hours, [table[h][alg]["time"] for h in hours], color, RM_SHORT[alg], dashed=dashed)
-    (out / "RM_time.svg").write_text(p.render())
+    (out / f"{prefix}_time.svg").write_text(p.render())
 
-    q = LinePlot("Real road map: heuristic accuracy over the day", "hour of the day",
+    q = LinePlot(f"{who}: heuristic accuracy over the day", "hour of the day",
                  "accuracy (mean of estimate / real remaining time)", subtitle=sub, xticks=hours,
                  xlim=(min(hours), max(hours)), width=900, yfmt=lambda v: f"{v:.0%}")
     for alg in ("astar", "alt_now", "alt_night", "alt_rush"):
         color, dashed = _rm_style(alg)
         q.line(hours, [table[h][alg]["accuracy"] for h in hours], color, RM_SHORT[alg], dashed=dashed)
     q.reference([min(hours), max(hours)], [1.0, 1.0], "exact")
-    (out / "RM_accuracy.svg").write_text(q.render())
+    (out / f"{prefix}_accuracy.svg").write_text(q.render())
 
     rush = [table[h]["alt_rush"] for h in hours]
-    (out / "RM_wrong.svg").write_text(bar_chart(
-        "Landmarks measured at 8h: wrong at almost every other hour", [f"{h}h" for h in hours], [
+    title = ("Landmarks measured at 8h: wrong at almost every other hour" if not yonsei
+             else "Trips from Yonsei: landmarks measured at 8h, used at other hours")
+    (out / f"{prefix}_wrong.svg").write_text(bar_chart(
+        title, [f"{h}h" for h in hours], [
             dict(label="points where the estimate is too high (%)", color=tint(ALGO_COLORS["jps"], 0.45),
                  values=[g["over"] * 100 for g in rush]),
             dict(label="queries answered with a longer route (%)", color=ALGO_COLORS["jps"],
@@ -887,6 +893,197 @@ def chart_rm_model(network, out):
             ys.append(sum(m[i] for i in idx) / len(idx))
         p.line(hours, ys, tint(ALGO_COLORS["astar"], shades[grp]), grp)
     (out / "RM_model.svg").write_text(p.render())
+
+
+# congestion map: travel time / free flow in four levels, traffic-light colors as in navigation apps
+# (checked for color-blind separation; the legend labels each level, so color is never the only cue)
+MAP_BINS = [(1.20, "#239a3b", "free (x1.0-1.2)"), (1.50, "#d9ab00", "slow (x1.2-1.5)"),
+            (2.00, "#e5590a", "congested (x1.5-2.0)"), (99.0, "#a8141c", "jammed (x2.0 or more)")]
+MAP_HOURS = (3, 7, 8, 12, 18, 21)
+MAP_LABELS = {3: "3h (night)", 8: "8h (morning peak)", 12: "12h (midday)", 18: "18h (evening peak)"}
+
+
+def chart_rm_congestion_map(network, out, hours=MAP_HOURS, cols=3, panel=300, name="RM_map.svg",
+                            title="Congestion on Songdo roads by hour (traffic model)", panels=None,
+                            subtitle="Travel time / free-flow time. Each direction is drawn on its own side of the road "
+                                     "(keep right); big roads thicker. Black ring = centre of Songdo."):
+    """Songdo roads colored by how much slower than free flow they are at each hour.
+
+    Each direction of a road is drawn slightly to the right of the centre line
+    (cars keep right in Korea), so commute direction shows: lanes into the centre
+    are redder in the morning, lanes out of it in the evening.
+    """
+    lat, lon = network.lat, network.lon
+    lat0, lat1, lon0, lon1 = min(lat), max(lat), min(lon), max(lon)
+    kx = math.cos(math.radians((lat0 + lat1) / 2))
+    scale = panel / max((lon1 - lon0) * kx, lat1 - lat0)
+    pw, ph = (lon1 - lon0) * kx * scale, (lat1 - lat0) * scale
+    gap, top, title_h = 24, 92, 22
+    panels = panels or [(h, 0, MAP_LABELS.get(h, f"{h}h")) for h in hours]   # (hour, direction filter, label)
+    rows = math.ceil(len(panels) / cols)
+    W, H = int(cols * pw + (cols + 1) * gap), int(top + rows * (ph + title_h + gap) + 80)
+    big = {"highway", "arterial"}
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
+             f'font-family="{FONT}" role="img" aria-label="Congestion on Songdo roads by hour">',
+             f'<rect width="{W}" height="{H}" fill="{SURFACE}"/>',
+             f'<text x="{gap}" y="34" font-size="20" font-weight="700" fill="{INK}">'
+             f'{title}</text>',
+             f'<text x="{gap}" y="58" font-size="13" fill="{INK_2}">{subtitle}</text>',
+             f'<text x="{gap}" y="{H - 10}" font-size="11" fill="{MUTED}">'
+             f'Map data (c) OpenStreetMap contributors, ODbL 1.0. Traffic is a model (src/roads.py).</text>']
+    for k, (hour, sign, label) in enumerate(panels):
+        mult = network.multipliers(hour)
+        shown = [m for m, c in zip(mult, network.toward) if not sign or c * sign >= 0.3]
+        ox = gap + (k % cols) * (pw + gap)
+        oy = top + (k // cols) * (ph + title_h + gap)
+        parts.append(f'<text x="{ox:.0f}" y="{oy + 14:.0f}" font-size="14" font-weight="600" fill="{INK}">'
+                     f'{label}<tspan dx="10" fill="{MUTED}" font-weight="400">'
+                     f'average x{sum(shown) / len(shown):.2f}</tspan></text>')
+        paths = {(b, wide): [] for b in range(len(MAP_BINS)) for wide in (False, True)}
+        faint = []
+        for i, (u, v) in enumerate(zip(network.eu, network.ev)):
+            if sign and network.toward[i] * sign < 0.3:          # not heading this way: context only
+                fx0, fy0 = ox + (lon[u] - lon0) * kx * scale, oy + title_h + (lat1 - lat[u]) * scale
+                fx1, fy1 = ox + (lon[v] - lon0) * kx * scale, oy + title_h + (lat1 - lat[v]) * scale
+                faint.append(f"M{fx0:.1f} {fy0:.1f}L{fx1:.1f} {fy1:.1f}")
+                continue
+            b = next(j for j, (hi, _, _) in enumerate(MAP_BINS) if mult[i] < hi)
+            wide = network.group[i] in big
+            x0, y0 = ox + (lon[u] - lon0) * kx * scale, oy + title_h + (lat1 - lat[u]) * scale
+            x1, y1 = ox + (lon[v] - lon0) * kx * scale, oy + title_h + (lat1 - lat[v]) * scale
+            d = math.hypot(x1 - x0, y1 - y0) or 1.0
+            off = (1.3 if wide else 0.7) * panel / 300       # right-hand side of the direction of travel
+            nx, ny = (0.0, 0.0) if sign else (-(y1 - y0) / d * off, (x1 - x0) / d * off)
+            paths[b, wide].append(f"M{x0 + nx:.1f} {y0 + ny:.1f}L{x1 + nx:.1f} {y1 + ny:.1f}")
+        if faint:
+            parts.append(f'<path d="{"".join(faint)}" stroke="#ecebe6" stroke-width="1" fill="none"/>')
+        for wide in (False, True):                          # green first, red last: jams stay on top
+            for b in range(len(MAP_BINS)):
+                if paths[b, wide]:
+                    parts.append(f'<path d="{"".join(paths[b, wide])}" stroke="{MAP_BINS[b][1]}" '
+                                 f'stroke-width="{(2.2 if wide else 1.0) * panel / 300:.1f}" '
+                                 f'stroke-linecap="round" fill="none"/>')
+        cx = ox + (roads.CENTER[1] - lon0) * kx * scale
+        cy = oy + title_h + (lat1 - roads.CENTER[0]) * scale
+        parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{5 * panel / 300:.1f}" fill="none" '
+                     f'stroke="{INK}" stroke-width="2"/>')
+    x, ly = gap, H - 40
+    for _, color, text in MAP_BINS:
+        parts.append(f'<rect x="{x}" y="{ly - 11}" width="26" height="12" rx="2" fill="{color}"/>')
+        parts.append(f'<text x="{x + 32}" y="{ly}" font-size="13" fill="{INK_2}">{text}</text>')
+        x += 32 + 7 * len(text) + 20
+    parts.append("</svg>")
+    (out / name).write_text("\n".join(parts))
+
+
+def chart_ry_trips(network, goals, out, start, panel=560):
+    """Where the trips of experiment RY go: Yonsei (start) and the 30 goals on the Songdo map."""
+    lat, lon = network.lat, network.lon
+    lat0, lat1, lon0, lon1 = min(lat), max(lat), min(lon), max(lon)
+    kx = math.cos(math.radians((lat0 + lat1) / 2))
+    scale = panel / max((lon1 - lon0) * kx, lat1 - lat0)
+    gap, top = 24, 100
+    W, H = int((lon1 - lon0) * kx * scale + 2 * gap), int(top + (lat1 - lat0) * scale + 60)
+
+    def xy(la, lo):
+        return gap + (lo - lon0) * kx * scale, top + (lat1 - la) * scale
+
+    big = {"highway", "arterial"}
+    paths = {False: [], True: []}
+    for u, v, g in zip(network.eu, network.ev, network.group):
+        (x0, y0), (x1, y1) = xy(lat[u], lon[u]), xy(lat[v], lon[v])
+        paths[g in big].append(f"M{x0:.1f} {y0:.1f}L{x1:.1f} {y1:.1f}")
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
+             f'font-family="{FONT}" role="img" aria-label="Trips from Yonsei University">',
+             f'<rect width="{W}" height="{H}" fill="{SURFACE}"/>',
+             f'<text x="{gap}" y="34" font-size="20" font-weight="700" fill="{INK}">'
+             f'Experiment RY: {len(goals)} trips from Yonsei University</text>',
+             f'<text x="{gap}" y="58" font-size="13" fill="{INK_2}">Start: campus corner on Songdogwahak-ro. '
+             f'Goals: random road points</text>',
+             f'<text x="{gap}" y="76" font-size="13" fill="{INK_2}">at least 1.5 km away, the same at every hour.</text>',
+             f'<path d="{"".join(paths[False])}" stroke="#dcdad3" stroke-width="0.8" fill="none"/>',
+             f'<path d="{"".join(paths[True])}" stroke="#c3c1b8" stroke-width="1.6" fill="none"/>']
+    sx, sy = xy(lat[start], lon[start])
+    for g in goals:
+        gx, gy = xy(lat[g], lon[g])
+        parts.append(f'<line x1="{sx:.1f}" y1="{sy:.1f}" x2="{gx:.1f}" y2="{gy:.1f}" stroke="{ALGO_COLORS["alt"]}" '
+                     f'stroke-opacity="0.25" stroke-width="1"/>')
+    for g in goals:
+        gx, gy = xy(lat[g], lon[g])
+        parts.append(f'<circle cx="{gx:.1f}" cy="{gy:.1f}" r="4.5" fill="{ALGO_COLORS["alt"]}" '
+                     f'stroke="{SURFACE}" stroke-width="2"/>')
+    cx, cy = xy(*roads.CENTER)
+    parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="6" fill="none" stroke="{INK}" stroke-width="2"/>')
+    parts.append(f'<text x="{cx + 10:.1f}" y="{cy - 8:.1f}" font-size="12" fill="{INK_2}">Central Park</text>')
+    parts.append(f'<circle cx="{sx:.1f}" cy="{sy:.1f}" r="8" fill="{INK}" stroke="{SURFACE}" stroke-width="2.5"/>')
+    parts.append(f'<text x="{sx + 12:.1f}" y="{sy + 18:.1f}" font-size="13" font-weight="600" fill="{INK}">'
+                 f'Yonsei University (start)</text>')
+    parts.append(f'<text x="{gap}" y="{H - 30}" font-size="11" fill="{MUTED}">'
+                 f'Thin lines join start and goal in a straight line (not the route).</text>')
+    parts.append(f'<text x="{gap}" y="{H - 14}" font-size="11" fill="{MUTED}">'
+                 f'Map data (c) OpenStreetMap contributors, ODbL 1.0.</text>')
+    parts.append("</svg>")
+    (out / "RY_trips.svg").write_text("\n".join(parts))
+
+
+def rm_change(network, n_queries=30):
+    """Each hour against the night map, for the same start/goal pairs as experiment RM.
+
+    Returns rows (hour, mean segment slowdown, median trip slowdown, worst trip slowdown,
+    share of queries whose fastest route changed, median and worst extra time of
+    still driving the night route).
+    """
+    from bench import BASE_SEED
+    from search import dijkstra
+    night = network.graph_at(roads.NIGHT)
+    queries = [roads.random_query(night, BASE_SEED + i) for i in range(n_queries)]
+    base = {q: dijkstra(night, *q) for q in queries}
+    night_total = sum(network.costs_at(roads.NIGHT))
+    rows = []
+    for hour in range(24):
+        g = network.graph_at(hour)
+        ratios, changed, loss = [], 0, []
+        for q in queries:
+            r, b = dijkstra(g, *q), base[q]
+            ratios.append(r.cost / b.cost)
+            changed += r.path != b.path
+            keep = sum(g.move_cost(a, c) for a, c in zip(b.path, b.path[1:]))
+            loss.append((keep / r.cost - 1) * 100)
+        rows.append(dict(hour=hour, segment=sum(network.costs_at(hour)) / night_total,
+                         trip=statistics.median(ratios), trip_max=max(ratios), changed=changed / len(queries) * 100,
+                         loss=statistics.median(loss), loss_max=max(loss)))
+    return rows
+
+
+def chart_rm_change(rows, out):
+    hours = [r["hour"] for r in rows]
+    dark, mid, light = INK_2, MUTED, "#c9c7bf"
+    p = LinePlot("How much slower than the night map, by hour", "hour of the day",
+                 "travel time / night travel time", xticks=[0, 3, 6, 8, 12, 15, 18, 21, 23], xlim=(0, 23), width=900,
+                 subtitle="Same 30 start/goal pairs as experiment RM. Trips use big roads, which slow down more than "
+                          "the average road.")
+    p.line(hours, [r["trip_max"] for r in rows], light, "slowest trip", dashed=True)
+    p.line(hours, [r["trip"] for r in rows], dark, "typical trip (median)")
+    p.line(hours, [r["segment"] for r in rows], mid, "average road segment", dashed=True)
+    (out / "RM_change.svg").write_text(p.render())
+    sel = [r for r in rows if roads.rush(r["hour"]) > 0]
+    (out / "RM_route.svg").write_text(bar_chart(
+        "Does the fastest route change during the day?", [f"{r['hour']}h" for r in sel], [
+            dict(label="queries whose fastest route differs from the night (%)", color=mid,
+                 values=[r["changed"] for r in sel]),
+            dict(label="extra time if you keep the night route, worst query (%)", color=dark,
+                 values=[r["loss_max"] for r in sel]),
+        ], "%", value_labels=True, value_fmt=lambda v: f"{v:.0f}",
+        subtitle=f"Typical (median) extra time of keeping the night route: at most "
+                 f"{max(r['loss'] for r in sel):.1f}% at any hour.", ylim=(0, 100), width=1000))
+
+
+def rm_change_table(rows):
+    return md_table(["hour", "average segment vs night", "typical trip vs night", "slowest trip vs night",
+                     "fastest route changed", "keep night route: typical / worst extra"],
+                    [[f"{r['hour']}h", f"x{r['segment']:.2f}", f"x{r['trip']:.2f}", f"x{r['trip_max']:.2f}",
+                      f"{r['changed']:.0f}%", f"+{r['loss']:.1f}% / +{r['loss_max']:.1f}%"] for r in rows],
+                    ["---"] + ["---:"] * 5)
 
 
 def rm_section_table(table):
@@ -924,7 +1121,8 @@ def analyze(results_dir, out_dir, log=print):
     charts = out_dir / "charts"
     charts.mkdir(parents=True, exist_ok=True)
     data = {exp: load(results_dir, exp)
-            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "RM", "noise")}
+            for exp in ("A", "B", "C", "D", "E", "T", "W", "H", "BI", "O", "J", "HQ", "DY", "LP", "RM", "RY",
+                        "noise")}
     md = ["# Experiment results", "",
           "Generated by `make analyze` from the raw data in `results/`. "
           "Times are medians over 10 maps x 5 runs with the interquartile range (IQR) in brackets.", ""]
@@ -1090,13 +1288,41 @@ def analyze(results_dir, out_dir, log=print):
         images = ["RM_time.svg", "RM_accuracy.svg", "RM_wrong.svg"]
         if net:
             chart_rm_model(net, charts)
-            images.insert(0, "RM_model.svg")
+            chart_rm_congestion_map(net, charts)
+            chart_rm_congestion_map(
+                net, charts, cols=2, panel=360, name="RM_map_direction.svg",
+                title="Morning: lanes into the centre jam. Evening: lanes out of it.",
+                subtitle="Travel time / free-flow time. Left: lanes heading toward the centre (black ring). "
+                         "Right: lanes heading away.",
+                panels=[(8, 1, "8h, lanes heading into the centre"), (8, -1, "8h, lanes heading out"),
+                        (18, 1, "18h, lanes heading into the centre"), (18, -1, "18h, lanes heading out")])
+            change = rm_change(net)
+            chart_rm_change(change, charts)
+            images = ["RM_model.svg", "RM_map.svg", "RM_map_direction.svg", "RM_change.svg", "RM_route.svg"] + images
+            section("RM0. How much the Songdo map changes over the day (traffic model)", [],
+                    rm_change_table(change),
+                    "Same start/goal pairs as RM, fastest route at each hour compared with the night (free flow).")
         section("RM. Real road map (Songdo, OpenStreetMap) over the day", images, rm_section_table(table),
                 "Map data (c) OpenStreetMap contributors, ODbL 1.0 (data/songdo_roads.json). Edge cost = travel time "
                 "in tenths of a second at that hour. The traffic is a model (src/roads.py), not measured traffic. "
                 "The straight-line heuristic divides the great-circle distance by the fastest free-flow speed. "
                 "Landmarks (8) are measured once per hour and reused by all queries of that hour. "
                 "Night landmarks are checked to be optimal in every run.")
+
+    if data["RY"]:
+        table = rm_table(data["RY"])
+        quick = any(r["params"].get("network") == "songdo-center" for r in data["RY"])
+        net = roads.load_network(quick=quick) if roads.data_available() else None
+        chart_rm(table, charts, net, prefix="RY")
+        images = ["RY_time.svg", "RY_accuracy.svg", "RY_wrong.svg"]
+        if net:
+            first = min(r["params"]["hour"] for r in data["RY"])
+            goals = sorted({int(r["goal"]) for r in data["RY"] if r["params"]["hour"] == first})
+            chart_ry_trips(net, goals, charts, int(data["RY"][0]["start"]))
+            images = ["RY_trips.svg"] + images
+        section("RY. Trips from Yonsei University International Campus", images, rm_section_table(table),
+                "Same map, traffic model and methods as RM, but every trip starts at the campus corner on "
+                "Songdogwahak-ro (roads.YONSEI). 30 goals, the same at every hour.")
 
     section("Code size", [], code_size_table(),
             "Lines of code without blank lines, comments and docstrings.")
